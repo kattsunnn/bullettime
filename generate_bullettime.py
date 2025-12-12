@@ -9,6 +9,7 @@ from ppi import PPI
 import search_similar_img as ssi
 import img_utils.img_utils as iu
 import super_resolution.super_resolution as sr
+from reid.osnet_reid import OSNetReID
 
 FOV = 30
 _map_cache = {}
@@ -219,132 +220,59 @@ def generate_same_person_imgs(imgs, output_path):
     scaled_gaze_imgs_list = [generate_scaled_gaze_imgs(img, output_path, f"camera_{idx}") for idx, img in enumerate(imgs)]
     # デバック
     for idx, scaled_gaze_imgs in enumerate(scaled_gaze_imgs_list):
+        if not scaled_gaze_imgs:
+            continue
         cropped_gaze_imgs = filter_none(map(generate_crop_img, scaled_gaze_imgs))
         iu.save_imgs(cropped_gaze_imgs, f"{output_path}/04_cropped", f"camera_{idx}_{{}}")
 
-    #スケール画像とクロップ画像のペアを作成。processed_gaze_imgs_list[カメラ番号][画像番号]["scaled"or"cropped"]
-    processed_gaze_imgs_list = []
-    for cam_idx, imgs in enumerate(scaled_gaze_imgs_list):
-        processed_gaze_imgs = []
-        for img in imgs:
-            cropped_img = generate_crop_img(img)
-            if cropped_img is not None: 
-                processed_gaze_imgs.append({ "scaled": img, "cropped": cropped_img  })
-        if processed_gaze_imgs:
-            processed_gaze_imgs_list.append(processed_gaze_imgs)
+    cropped_gaze_img_paths = iu.load_img_paths_from_dir(f"{output_path}/04_cropped")
+    groups = OSNetReID.cluster_imgs(cropped_gaze_img_paths)
+    for label, paths in groups.items():
+        print(f"Cluster {label}:")
+        for path in paths:
+            print(f"  {path}")
 
-    # model_pahth = "super_resolution/models/EDSR_x4.pb"
+#Todo:カメラ番号を渡して、画像を出力する
+# def generate_same_person_imgs(imgs, output_path):
+#     scaled_gaze_imgs_list = [generate_scaled_gaze_imgs(img, output_path, f"camera_{idx}") for idx, img in enumerate(imgs)]
+#     # デバック
+#     for idx, scaled_gaze_imgs in enumerate(scaled_gaze_imgs_list):
+#         cropped_gaze_imgs = filter_none(map(generate_crop_img, scaled_gaze_imgs))
+#         iu.save_imgs(cropped_gaze_imgs, f"{output_path}/04_cropped", f"camera_{idx}_{{}}")
 
-    if processed_gaze_imgs_list[0]:
-        query_imgs_cropped = [img["cropped"] for img in processed_gaze_imgs_list[0] ]
-        # query_imgs_cropped = [ sr.edsr_x4(img["cropped"], model_pahth) for img in processed_gaze_imgs_list[0] ]
-        cand_imgs_list = processed_gaze_imgs_list
+#     #スケール画像とクロップ画像のペアを作成。processed_gaze_imgs_list[カメラ番号][画像番号]["scaled"or"cropped"]
+#     processed_gaze_imgs_list = []
+#     for cam_idx, imgs in enumerate(scaled_gaze_imgs_list):
+#         processed_gaze_imgs = []
+#         for img in imgs:
+#             cropped_img = generate_crop_img(img)
+#             if cropped_img is not None: 
+#                 processed_gaze_imgs.append({ "scaled": img, "cropped": cropped_img  })
+#         if processed_gaze_imgs:
+#             processed_gaze_imgs_list.append(processed_gaze_imgs)
 
-    for idx, query_img_cropped in enumerate(query_imgs_cropped):
-        same_person_imgs = []
-        matching_imgs = []
-        for cand_imgs in cand_imgs_list:
-            cand_imgs_cropped = [img["cropped"] for img in cand_imgs ]
-            # cand_imgs_cropped = [ sr.edsr_x4(img["cropped"], model_pahth) for img in cand_imgs]
-            result = ssi.search_by_sift_ratiotest(query_img_cropped, cand_imgs_cropped)
-            if result is None: continue
-            most_similar_img_idx, most_similar_img, matching_img = result
-            same_person_imgs.append(cand_imgs[most_similar_img_idx]["scaled"])
-            matching_imgs.append(matching_img)
-            query_img_cropped = most_similar_img
-        print(len(same_person_imgs))
-        iu.save_imgs(same_person_imgs, f"{output_path}/05_same_person", f"person_{idx}_{{}}")
-        iu.save_imgs(matching_imgs, f"{output_path}/06_matching", f"person_{idx}_matching_{{}}")
+#     # model_pahth = "super_resolution/models/EDSR_x4.pb"
 
+#     if processed_gaze_imgs_list[0]:
+#         query_imgs_cropped = [img["cropped"] for img in processed_gaze_imgs_list[0] ]
+#         # query_imgs_cropped = [ sr.edsr_x4(img["cropped"], model_pahth) for img in processed_gaze_imgs_list[0] ]
+#         cand_imgs_list = processed_gaze_imgs_list
 
-# 中間結果を出力する
-# def generate_scaled_gaze_img_debug(img, output_path, file_name_pattern):
-
-#     ppis = generate_front_ppis(img)
-#     # 透視投影画像生成結果
-#     ppi_result = [ppi.get_ppi() for ppi in ppis]
-#     iu.save_imgs(ppi_result, f"{output_path}/00_ppi_result", f"{file_name_pattern}_{{}}")
-
-#     # 骨格検出結果
-#     if ppis == None: 
-#         return
-#     pd_result = []
-#     for ppi in ppis:
-#         pose_detector_for_ppi = PD(ppi.get_ppi())
-#         if pose_detector_for_ppi.is_pose_detected():
-#             ppi_with_landmarks = pose_detector_for_ppi.draw_pose_landmarks()
-#             pd_result.append(ppi_with_landmarks)
-#     if pd_result == []:
-#         return
-#     iu.save_imgs(pd_result, f"{output_path}/01_pd_result", f"{file_name_pattern}_{{}}")
-
-#     collect_gaze_point_candidate = collect_gaze_point_candidates(ppis)
-#     if collect_gaze_point_candidate.size == 0:
-#         return None
-#     grouped_points = grouping_points(collect_gaze_point_candidate)
-#     centered_points = list(map(centering_points, grouped_points.values()))
-#     gaze_ppis = [ generate_ppi(img, cp[0], cp[1]-90) for cp in centered_points ]
-
-#     # 注視画像結果
-#     if gaze_ppis == []: 
-#         return
-#     gaze_img = []
-#     for ppi in gaze_ppis:
-#         pose_detector_for_ppi = PD(ppi.get_ppi())
-#         if pose_detector_for_ppi.is_pose_detected():
-#             ppi_with_landmarks = pose_detector_for_ppi.draw_pose_landmarks()
-#             gaze_img.append(ppi_with_landmarks)
-#     if gaze_img == []:
-#         return
-#     iu.save_imgs(gaze_img, f"{output_path}/02_gaze_img", f"{file_name_pattern}_{{}}")
-
-#     scaled_ppis = list(filter(None, map(scaling_person_by_height, gaze_ppis)))
-#     scaled_ppis = [ppi for ppi in scaled_ppis if is_gaze_img(ppi.get_ppi())]  # 被写体が中央かチェック
-
-#     # スケール後
-#     if scaled_ppis == []: 
-#         return
-#     scaled_gaze_img = []
-#     for ppi in scaled_ppis:
-#         pose_detector_for_ppi = PD(ppi.get_ppi())
-#         if pose_detector_for_ppi.is_pose_detected():
-#             ppi_with_landmarks = pose_detector_for_ppi.draw_pose_landmarks()
-#             scaled_gaze_img.append(ppi_with_landmarks)
-#     iu.save_imgs(scaled_gaze_img, f"{output_path}/03_scaled_gaze_img", f"{file_name_pattern}_{{}}")  
- 
-#     return [ppi.get_ppi() for ppi in scaled_ppis]
-
-# def generate_bullettime_debug(query_img, imgs, output_path):
-#     bullettime = []
-#     query_img_cropped = generate_crop_img(query_img)
-#     if query_img_cropped is None: return None
-#     for idx, img in enumerate(imgs):
-#         file_name_pattern = f"camera_{idx+1}"
-#         # スケーリングした注視画像の生成
-#         candidate_imgs = generate_scaled_gaze_img_debug(img, output_path, file_name_pattern)
-#         if candidate_imgs is None: 
-#             continue
-#         # クロップ画像の生成
-#         candidate_imgs_cropped = filter_none_from_img_list(map(generate_crop_img, candidate_imgs))
-#         if candidate_imgs_cropped == []:
-#             continue
-#         iu.save_imgs(candidate_imgs_cropped, f"{output_path}/04_crop_img", f"{file_name_pattern}_{{}}", )
-#         # 類似画像検索
-#         most_similar_img_idx, most_similar_img = ssi.search_most_similar_img_by_sift(query_img_cropped, candidate_imgs_cropped, match_thresh=0)
-#         if most_similar_img_idx is None: 
-#             continue
-#         query_img_cropped = most_similar_img
-#         bullettime.append(candidate_imgs[most_similar_img_idx])
-#     return bullettime
-
-# def generate_bullettimes_debug(imgs, output_path):
-    # bullettime = None
-    # query_imgs = generate_scaled_gaze_img(imgs[0])
-    # if query_imgs is None: return
-    # for idx, query_img in enumerate(query_imgs):
-    #     bullettime = generate_bullettime_debug(query_img, imgs, output_path)
-    #     if bullettime:
-    #         iu.save_imgs(bullettime, f"{output_path}/05_bullettime", file_name_pattern=f"bullettime_{{}}")
+#     for idx, query_img_cropped in enumerate(query_imgs_cropped):
+#         same_person_imgs = []
+#         matching_imgs = []
+#         for cand_imgs in cand_imgs_list:
+#             cand_imgs_cropped = [img["cropped"] for img in cand_imgs ]
+#             # cand_imgs_cropped = [ sr.edsr_x4(img["cropped"], model_pahth) for img in cand_imgs]
+#             result = ssi.search_by_sift_ratiotest(query_img_cropped, cand_imgs_cropped)
+#             if result is None: continue
+#             most_similar_img_idx, most_similar_img, matching_img = result
+#             same_person_imgs.append(cand_imgs[most_similar_img_idx]["scaled"])
+#             matching_imgs.append(matching_img)
+#             query_img_cropped = most_similar_img
+#         print(len(same_person_imgs))
+#         iu.save_imgs(same_person_imgs, f"{output_path}/05_same_person", f"person_{idx}_{{}}")
+#         iu.save_imgs(matching_imgs, f"{output_path}/06_matching", f"person_{idx}_matching_{{}}")
 
 # Todo: 全体を分割する
 if __name__ == '__main__':
@@ -355,9 +283,9 @@ if __name__ == '__main__':
 
     input_path = sys.argv[1]
     output_path = sys.argv[2]
-    imgs_path = glob.glob(os.path.join(input_path, "*.jpg")) 
-    imgs_path.sort()
-    print(imgs_path)
-    imgs = [cv2.imread(img_path) for img_path in imgs_path ]
+    img_paths = iu.load_img_paths_from_dir(input_path)
+    img_paths.sort()
+    print(img_paths)
+    imgs = [cv2.imread(img_path) for img_path in img_paths ]
 
     generate_same_person_imgs(imgs, output_path)
