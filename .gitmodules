@@ -4,9 +4,6 @@
 [submodule "super_resolution"]
 	path = super_resolution
 	url = git@github.com:kattsunnn/super_resolution.git
-[submodule "ReId"]
-	path = ReId
-	url = git@github.com:kattsunnn/ReId.git
-[submodule "reid"]
-	path = reid
-	url = git@github.com:kattsunnn/ReId.git
+[submodule "person_re_identification"]
+	path = person_re_identification
+	url = git@github.com:kattsunnn/person_re_identification.git

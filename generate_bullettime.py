@@ -9,7 +9,7 @@ from ppi import PPI
 import search_similar_img as ssi
 import img_utils.img_utils as iu
 import super_resolution.super_resolution as sr
-from reid.osnet_reid import OSNetReID
+from person_re_identification.osnet_reid import OSNetReID
 
 FOV = 30
 _map_cache = {}
