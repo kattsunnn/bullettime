@@ -7,3 +7,6 @@
 [submodule "person_re_identification"]
 	path = person_re_identification
 	url = git@github.com:kattsunnn/person_re_identification.git
+[submodule "omni_directional_img_utils"]
+	path = omni_directional_img_utils
+	url = git@github.com:kattsunnn/omni_directional_img_utils.git
