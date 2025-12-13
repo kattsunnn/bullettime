@@ -4,12 +4,13 @@ import cv2
 from sklearn.cluster import DBSCAN
 
 from pd import PD
-from ppi import PPI
+
 import search_similar_img as ssi
 import img_utils.img_utils as iu
 import super_resolution.super_resolution as sr
 from person_re_identification.osnet_reid import OSNetReID
 from omni_directional_img_utils.e2p import E2P
+from omni_directional_img_utils.ppi import PPI
 
 FOV = 30
 _map_cache = {}
