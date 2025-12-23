@@ -12,17 +12,15 @@ from person_re_identification.osnet_reid import OSNetReID
 from omni_directional_img_utils.e2p import E2P
 from omni_directional_img_utils.ppi import PPI
 
-FOV = 30
+FOV = 60
 _map_cache = {}
 
-def get_or_create_map(src_img_w, src_img_h, fov, theta_eye, phi_eye):
-    cache_key = (src_img_w, src_img_h, fov, theta_eye, phi_eye)
+def get_or_create_map(src_img_w, src_img_h, fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, scale=1):
+    cache_key = (src_img_w, src_img_h, fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, scale)
     
     if cache_key not in _map_cache:
         map = E2P(src_img_w, src_img_h)
-        dst_w = map.calc_optimal_width(fov)
-        dst_h = map.calc_optimal_height(fov)
-        map.generate_map(dst_w, dst_h, theta_eye, phi_eye, 0)
+        map.generate_map(fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, 0, scale)
         _map_cache[cache_key] = map
     
     return _map_cache[cache_key]
@@ -31,8 +29,8 @@ def get_or_create_map(src_img_w, src_img_h, fov, theta_eye, phi_eye):
 # 透視投影画像群の生成
 def generate_front_ppis(img_e, fov=FOV, overlap=0.5):
     # 使用する全方位カメラの解像度
-    src_img_h = img_e.shape[0]
-    src_img_w = img_e.shape[1]
+    img_e_w = img_e.shape[1]
+    img_e_h = img_e.shape[0]
     # 透視投影画像を生成する視線角度の設定
     THETA_RANGE = 90
     PHI_RANGE = 60
@@ -46,10 +44,9 @@ def generate_front_ppis(img_e, fov=FOV, overlap=0.5):
     for j, phi_eye in enumerate(phi_eyes):
         for i, theta_eye in enumerate(theta_eyes):
             # 透視投影画像の生成
-            map = get_or_create_map(src_img_w, src_img_h, fov, theta_eye, phi_eye)
-            dst_img = map.generate_img(img_e)
-            # 保存
-            ppi = PPI(img_e, dst_img, theta_eye, phi_eye)
+            map = get_or_create_map(img_e_w, img_e_h, fov, fov, theta_eye, phi_eye)
+            ppi = map.generate_img(img_e)
+            ppi = PPI(img_e, ppi, theta_eye, phi_eye)
             ppis.append(ppi)
     return ppis
 
@@ -57,10 +54,7 @@ def generate_front_ppis(img_e, fov=FOV, overlap=0.5):
 def generate_ppi(img_e, theta_eye, phi_eye, scale=1, fov=FOV):
     img_e_w = img_e.shape[1]
     img_e_h = img_e.shape[0]
-    map = E2P(img_e_w, img_e_h)
-    dst_w = map.calc_optimal_width(fov)
-    dst_h = map.calc_optimal_height(fov)
-    map.generate_map(dst_w, dst_h, theta_eye, phi_eye, 0, scale)
+    map = get_or_create_map(img_e_w, img_e_h, fov, fov, theta_eye, phi_eye, scale)
     ppi = map.generate_img(img_e)
     return PPI(img_e, ppi, theta_eye, phi_eye)
 
