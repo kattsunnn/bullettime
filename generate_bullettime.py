@@ -12,7 +12,7 @@ from person_re_identification.osnet_reid import OSNetReID
 from omni_directional_img_utils.e2p import E2P
 from omni_directional_img_utils.ppi import PPI
 
-FOV = 60
+FOV = 30 
 _map_cache = {}
 
 def get_or_create_map(src_img_w, src_img_h, fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, scale=1):
@@ -128,13 +128,14 @@ def scaling_person_by_height(ppi, k=2):
         # スケールに応じて解像度を自動調節
         scaling_fov = calc_optimal_fov_from_scale(ppi, ppi_scale)
         # 解像度が低下する場合は変更しない
-        if scaling_fov < FOV: 
+        if scaling_fov > FOV: 
+            # 画角を変えると解像度も変わる
             scaled_ppi = generate_ppi(  ppi.get_src_img(), 
                                         ppi.get_angle_u(),
                                         ppi.get_angle_v(),
                                         fov= scaling_fov)
         else:
-            # 解像度を一定に保ちたい場合。
+            # スケールを変えると解像度は変わらない
             scaled_ppi = generate_ppi(  ppi.get_src_img(), 
                                         ppi.get_angle_u(),
                                         ppi.get_angle_v(),
@@ -185,8 +186,9 @@ def generate_scaled_gaze_imgs(img, output_path, file_name_pattern):
     gaze_ppis = [ generate_ppi(img, cp[0], cp[1]-90) for cp in centered_points ]
     # デバッグ
     gaze_ppis_raw = [ gaze_ppi.get_ppi() for gaze_ppi in gaze_ppis ]
+    if gaze_ppis_raw: iu.save_imgs(gaze_ppis_raw, f"{output_path}/02_gaze_ppi", f"{file_name_pattern}_{{}}")
     gaze_ppis_pose = filter_none(map(detect_and_draw_pose, gaze_ppis_raw))
-    if gaze_ppis_raw: iu.save_imgs(gaze_ppis_pose, f"{output_path}/02_gaze_ppi_pose", f"{file_name_pattern}_{{}}")
+    if gaze_ppis_raw: iu.save_imgs(gaze_ppis_pose, f"{output_path}/02_gaze_ppi_pose", f"{file_name_pattern}__{{}}")
 
     # スケーリングと注視画像チェック
     scaled_ppis = filter_none(map(scaling_person_by_height, gaze_ppis))
@@ -194,6 +196,7 @@ def generate_scaled_gaze_imgs(img, output_path, file_name_pattern):
     if not scaled_ppis: return
     # デバッグ
     scaled_ppis_raw = [ scaled_ppi.get_ppi() for scaled_ppi in scaled_ppis ]
+    if scaled_ppis_raw: iu.save_imgs(scaled_ppis_raw, f"{output_path}/03_scaled_ppi", f"{file_name_pattern}_{{}}")
     scaled_ppis_pose = filter_none(map(detect_and_draw_pose, scaled_ppis_raw))
     if scaled_ppis_raw: iu.save_imgs(scaled_ppis_pose, f"{output_path}/03_scaled_ppi_pose", f"{file_name_pattern}_{{}}")
 
