@@ -58,6 +58,14 @@ def generate_ppi(img_e, theta_eye, phi_eye, scale=1, fov=FOV):
     ppi = map.generate_img(img_e)
     return PPI(img_e, ppi, theta_eye, phi_eye)
 
+def generate_gazed_ppi(ppi):
+    pose_detector = PD(ppi.get_ppi())
+    if pose_detector.is_pose_detected():
+        landmark_coordinate_x, landmark_coordinate_y = pose_detector.get_landmark_coordinate()
+        theta_e, phi_e = ppi.get_angular_coordinate(landmark_coordinate_x, landmark_coordinate_y)
+        gazed_ppi = generate_ppi(ppi.get_src_img(), theta_e, phi_e)
+        return gazed_ppi
+
 # スケールから適切なFOVを計算。
 def calc_optimal_fov_from_scale(ppi, scale):
     focal_length = ppi.get_focal_length()
@@ -68,17 +76,14 @@ def calc_optimal_fov_from_scale(ppi, scale):
     return fov_deg
 
 # Todo: 入力を画像に修正
-def collect_gaze_point_candidates(ppis, gaze_point_num=0):
-    gaze_point_candidates = []
-    for ppi in ppis:
-        pose_detector_for_ppi = PD(ppi.get_ppi())
-        if pose_detector_for_ppi.is_pose_detected():
-            # 注視点（鼻）の座標を取得
-            landmark_coordinate_x, landmark_coordinate_y = pose_detector_for_ppi.get_landmark_coordinate(gaze_point_num)
-            # 注視点の全方位画像上の角度座標を取得
-            theta_e, phi_e = ppi.get_angular_coordinate(landmark_coordinate_x, landmark_coordinate_y)
-            gaze_point_candidates.append([theta_e, phi_e])
-    return np.array(gaze_point_candidates, dtype=float)
+def get_gaze_point_on_omni(ppi, gaze_point_num=0):
+    pose_detector_for_ppi = PD(ppi.get_ppi())
+    if pose_detector_for_ppi.is_pose_detected():
+        # 注視点（鼻）の座標を取得
+        landmark_coordinate_x, landmark_coordinate_y = pose_detector_for_ppi.get_landmark_coordinate(gaze_point_num)
+        # 注視点の全方位画像上の角度座標を取得
+        theta_e, phi_e = ppi.get_angular_coordinate(landmark_coordinate_x, landmark_coordinate_y)
+    return theta_e, phi_e
 
 def grouping_points(points, eps=5, min_samples=1):
     if not isinstance(points, np.ndarray):
@@ -166,41 +171,81 @@ def detect_and_draw_pose(img):
 def filter_none(lst):
     return [ elem for elem in lst if elem is not None ]
 
-def generate_scaled_gaze_imgs(img, output_path, file_name_pattern):
+# def generate_scaled_gaze_imgs(img, output_path, file_name_pattern):
+#     # 正面方向の透視投影画像を生成
+#     ppis = generate_front_ppis(img)
+#     # デバッグ
+#     ppis_raw = [ppi.get_ppi() for ppi in ppis]
+#     if ppis_raw: iu.save_imgs(ppis_raw, f"{output_path}/00_ppi", f"{file_name_pattern}_{{}}")
+#     ppis_pose = filter_none(map(detect_and_draw_pose, ppis_raw))
+#     if ppis_pose: iu.save_imgs(ppis_pose, f"{output_path}/01_ppi_pose", f"{file_name_pattern}_{{}}")
+
+#     # 注視画像を生成
+#     collect_gaze_point_candidate = collect_gaze_point_candidates(ppis)
+#     if collect_gaze_point_candidate.size == 0: return None
+#     grouped_points = grouping_points(collect_gaze_point_candidate)
+#     centered_points = list(map(centering_points, grouped_points.values()))
+#     gaze_ppis = [ generate_ppi(img, cp[0], cp[1]-90) for cp in centered_points ]
+#     # デバッグ
+#     gaze_ppis_raw = [ gaze_ppi.get_ppi() for gaze_ppi in gaze_ppis ]
+#     if gaze_ppis_raw: iu.save_imgs(gaze_ppis_raw, f"{output_path}/02_gaze_ppi", f"{file_name_pattern}_{{}}")
+#     gaze_ppis_pose = filter_none(map(detect_and_draw_pose, gaze_ppis_raw))
+#     if gaze_ppis_raw: iu.save_imgs(gaze_ppis_pose, f"{output_path}/02_gaze_ppi_pose", f"{file_name_pattern}__{{}}")
+
+#     # スケーリングと注視画像チェック
+#     scaled_ppis = filter_none(map(scaling_person_by_height, gaze_ppis))
+#     scaled_ppis = [ ppi for ppi in scaled_ppis if is_gaze_img(ppi.get_ppi()) ]
+#     if not scaled_ppis: return
+#     # デバッグ
+#     scaled_ppis_raw = [ scaled_ppi.get_ppi() for scaled_ppi in scaled_ppis ]
+#     if scaled_ppis_raw: iu.save_imgs(scaled_ppis_raw, f"{output_path}/03_scaled_ppi", f"{file_name_pattern}_{{}}")
+#     scaled_ppis_pose = filter_none(map(detect_and_draw_pose, scaled_ppis_raw))
+#     if scaled_ppis_raw: iu.save_imgs(scaled_ppis_pose, f"{output_path}/03_scaled_ppi_pose", f"{file_name_pattern}_{{}}")
+
+#     return [ppi.get_ppi() for ppi in scaled_ppis]
+
+# センタリングしてからクラスタリングするアリゴリズム
+def generate_scaled_gazed_imgs_new(img, output_path, file_name_pattern):
     # 正面方向の透視投影画像を生成
     ppis = generate_front_ppis(img)
     # デバッグ
-    ppis_raw = [ppi.get_ppi() for ppi in ppis]
-    if ppis_raw: iu.save_imgs(ppis_raw, f"{output_path}/00_ppi", f"{file_name_pattern}_{{}}")
-    ppis_pose = filter_none(map(detect_and_draw_pose, ppis_raw))
-    if ppis_pose: iu.save_imgs(ppis_pose, f"{output_path}/01_ppi_pose", f"{file_name_pattern}_{{}}")
+    if ppis:
+        ppis_raw = [ppi.get_ppi() for ppi in ppis]
+        iu.save_imgs(ppis_raw, f"{output_path}/00_ppi", f"{file_name_pattern}_{{}}")
+        ppis_pose = filter_none([detect_and_draw_pose(img) for img in ppis_raw])
+        if ppis_pose: iu.save_imgs(ppis_pose, f"{output_path}/00_ppi_pose", f"{file_name_pattern}_{{}}")
 
-    # model_path = "super_resolution/models/EDSR_x4.pb"
-    # ppis = [ PPI(ppi.get_src_img(), sr.edsr_x4(ppi.get_ppi(), model_path), ppi.get_angle_u(), ppi.get_angle_v()) for ppi in ppis ]
+    # 注視画像の生成
+    gazed_ppis = filter_none([generate_gazed_ppi(ppi) for ppi in ppis ])
+    checked_gazed_ppis = [ gazed_ppi for gazed_ppi in gazed_ppis if is_gaze_img(gazed_ppi.get_ppi())]
+    if not checked_gazed_ppis: return None
+    # デバック
+    checked_gazed_ppis_raw = [ checked_gazed_ppi.get_ppi() for checked_gazed_ppi in checked_gazed_ppis]        
+    iu.save_imgs(checked_gazed_ppis_raw, f"{output_path}/01_checked_gazed_ppi", f"{file_name_pattern}_{{}}")
 
     # 注視画像を生成
-    collect_gaze_point_candidate = collect_gaze_point_candidates(ppis)
-    if collect_gaze_point_candidate.size == 0: return None
-    grouped_points = grouping_points(collect_gaze_point_candidate)
-    centered_points = list(map(centering_points, grouped_points.values()))
-    gaze_ppis = [ generate_ppi(img, cp[0], cp[1]-90) for cp in centered_points ]
+    gaze_point_candidates = filter_none([get_gaze_point_on_omni(checked_gazed_ppi) for checked_gazed_ppi in checked_gazed_ppis])
+    if not gaze_point_candidates: return None
+    grouped_points = grouping_points(np.array(gaze_point_candidates))
+    centered_points = [centering_points(grouped_point) for grouped_point in grouped_points.values()]
+    grouped_ppis = [ generate_ppi(img, cp[0], cp[1]) for cp in centered_points ]
     # デバッグ
-    gaze_ppis_raw = [ gaze_ppi.get_ppi() for gaze_ppi in gaze_ppis ]
-    if gaze_ppis_raw: iu.save_imgs(gaze_ppis_raw, f"{output_path}/02_gaze_ppi", f"{file_name_pattern}_{{}}")
-    gaze_ppis_pose = filter_none(map(detect_and_draw_pose, gaze_ppis_raw))
-    if gaze_ppis_raw: iu.save_imgs(gaze_ppis_pose, f"{output_path}/02_gaze_ppi_pose", f"{file_name_pattern}__{{}}")
+    grouped_ppis_raw = [ grouped_ppi.get_ppi() for grouped_ppi in grouped_ppis ]
+    iu.save_imgs(grouped_ppis_raw , f"{output_path}/02_grouped_ppi", f"{file_name_pattern}_{{}}")
+    grouped_ppis_pose = filter_none([detect_and_draw_pose(img) for img in grouped_ppis_raw ])
+    if grouped_ppis_pose: iu.save_imgs(grouped_ppis_pose, f"{output_path}/02_grouped_ppi_pose", f"{file_name_pattern}_{{}}")
 
     # スケーリングと注視画像チェック
-    scaled_ppis = filter_none(map(scaling_person_by_height, gaze_ppis))
-    scaled_ppis = [ ppi for ppi in scaled_ppis if is_gaze_img(ppi.get_ppi()) ]
-    if not scaled_ppis: return
+    scaled_ppis = filter_none([scaling_person_by_height(grouped_ppi) for grouped_ppi in grouped_ppis])
+    scaled_ppis = [ scaled_ppi for scaled_ppi in scaled_ppis if is_gaze_img(scaled_ppi.get_ppi()) ]
+    if not scaled_ppis: return None
     # デバッグ
     scaled_ppis_raw = [ scaled_ppi.get_ppi() for scaled_ppi in scaled_ppis ]
-    if scaled_ppis_raw: iu.save_imgs(scaled_ppis_raw, f"{output_path}/03_scaled_ppi", f"{file_name_pattern}_{{}}")
-    scaled_ppis_pose = filter_none(map(detect_and_draw_pose, scaled_ppis_raw))
-    if scaled_ppis_raw: iu.save_imgs(scaled_ppis_pose, f"{output_path}/03_scaled_ppi_pose", f"{file_name_pattern}_{{}}")
+    iu.save_imgs(scaled_ppis_raw, f"{output_path}/03_scaled_ppi", f"{file_name_pattern}_{{}}")
+    scaled_ppis_pose = filter_none([detect_and_draw_pose(img) for img in scaled_ppis_raw])
+    if scaled_ppis_pose: iu.save_imgs(scaled_ppis_pose, f"{output_path}/03_scaled_ppi_pose", f"{file_name_pattern}_{{}}")
 
-    return [ppi.get_ppi() for ppi in scaled_ppis]
+    return scaled_ppis_raw
 
 def generate_crop_img(img):
     pose_detector = PD(img)
@@ -209,7 +254,7 @@ def generate_crop_img(img):
 
 #Todo:カメラ番号を渡して、画像を出力する
 def generate_same_person_imgs(imgs, output_path):
-    scaled_gaze_imgs_list = [generate_scaled_gaze_imgs(img, output_path, f"camera_{idx}") for idx, img in enumerate(imgs)]
+    scaled_gaze_imgs_list = [generate_scaled_gazed_imgs_new(img, output_path, f"camera_{idx}") for idx, img in enumerate(imgs)]
     # デバック
     for idx, scaled_gaze_imgs in enumerate(scaled_gaze_imgs_list):
         if not scaled_gaze_imgs:
