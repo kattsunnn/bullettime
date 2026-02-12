@@ -141,4 +141,17 @@ class PD:
             print(f"{landmarkName:<20}:(x, y)=({landmark_coordinates.x:.3f},{landmark_coordinates.y:.3f})")
 
 
-# if __name__=="__main__":
+if __name__=="__main__":
+
+    import sys
+    import os
+
+    input_path = sys.argv[1]
+    output_path = sys.argv[2]
+
+    input_img = cv2.imread(input_path)
+    os.makedirs(output_path, exist_ok=True)
+
+    pose_detector = PD(input_img)
+    if pose_detector.is_pose_detected():
+        cv2.imwrite(os.path.join(output_path, 'detection_result.png'), pose_detector.draw_pose_landmarks())

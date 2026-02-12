@@ -215,7 +215,9 @@ def generate_scaled_gazed_imgs_new(img, output_path, file_name_pattern):
         ppis_pose = filter_none([detect_and_draw_pose(img) for img in ppis_raw])
         if ppis_pose: iu.save_imgs(ppis_pose, f"{output_path}/00_ppi_pose", f"{file_name_pattern}_{{}}")
 
-    # 注視画像の生成
+    # sr_ppisr.bicubic_interpolation(ppi)
+
+    # 注視画像の生成と注視画像チェック
     gazed_ppis = filter_none([generate_gazed_ppi(ppi) for ppi in ppis ])
     checked_gazed_ppis = [ gazed_ppi for gazed_ppi in gazed_ppis if is_gaze_img(gazed_ppi.get_ppi())]
     if not checked_gazed_ppis: return None
