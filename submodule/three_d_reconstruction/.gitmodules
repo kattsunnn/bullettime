@@ -1,0 +1,3 @@
+[submodule "submodule/omni_directional_img_utils"]
+	path = submodule/omni_directional_img_utils
+	url = https://github.com/kattsunnn/omni_directional_img_utils.git
