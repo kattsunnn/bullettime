@@ -211,7 +211,12 @@ def crop_person(img):
 class PPIWithExtrinsics:
     ppi: omni.PPI
     extrinsics: np.ndarray
-    
+
+# Todo: スケールをFovで統一するか検討する
+# def calc_scaled_fov(ref_fov, ref_d, target_d):
+#     target_fov = 2 * np.arctan( np.tan(ref_fov/2) * (ref_d/target_d)) 
+#     return target_fov
+
 def generate_ppi_from_world_point(world_point, extrinsics, img_e, fov, scale_distance=5):
     r = extrinsics[:3, :]
     t = extrinsics[3, :]
@@ -243,7 +248,7 @@ def generate_bullettime(imgs, fov, extrinsics, output_path):
 
     cropped_img_paths = list(cropped_img_map.keys()) 
     #Person ReId
-    person_cluster = reid.OSNetReID.cluster_imgs(cropped_img_paths, eps=0.2, min_samples=2)
+    person_cluster = reid.OSNetReID.cluster_imgs(cropped_img_paths, min_samples=2)
 
     gaze_points_of_world_coor = []
     src_img_w = imgs[0].shape[1]
