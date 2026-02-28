@@ -1,25 +1,29 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+# from typing import List, Tuple, Optional
 from pathlib import Path
-import pdb
+
 import numpy as np
 import cv2
 from sklearn.cluster import DBSCAN
 
-from submodule import omni_directional_img_utils as omni
-from submodule import three_d_reconstruction as tdr 
-from submodule import camera_calibration as camcal
+# from submodule import camera_calibration as camcal
+# from person_re_identification import osnet_reid as reid 
+import img_utils as iu
+from omni_directional_img_utils.e2p import E2P
+from omni_directional_img_utils.ppi import PPI  
+from camera_calibration.camera_calibration_utils import xw_to_xc
+from person_re_identification.osnet import OSNet
+from three_d_reconstruction import reconstruct_3d_points_from_omni_directional_img 
 
 from pd import PD
-from img_utils import img_utils as iu
-from person_re_identification import osnet_reid as reid 
+
 _map_cache = {}
 
 def get_or_create_map(src_img_w, src_img_h, fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, scale=1):
     cache_key = (src_img_w, src_img_h, fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, scale)
     
     if cache_key not in _map_cache:
-        map = omni.E2P(src_img_w, src_img_h)
+        map = E2P(src_img_w, src_img_h)
         map.generate_map(fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, 0, scale)
         _map_cache[cache_key] = map
     
@@ -46,7 +50,7 @@ def generate_front_ppis(img_e, fov, overlap=0.5):
             # 透視投影画像の生成
             map = get_or_create_map(img_e_w, img_e_h, fov, fov, theta_eye, phi_eye)
             ppi = map.generate_img(img_e)
-            ppi = omni.PPI(img_e, ppi, theta_eye, phi_eye)
+            ppi = PPI(img_e, ppi, theta_eye, phi_eye)
             ppis.append(ppi)
     return ppis
 
@@ -56,7 +60,7 @@ def generate_ppi(img_e, theta_eye, phi_eye, fov, scale=1):
     img_e_h = img_e.shape[0]
     map = get_or_create_map(img_e_w, img_e_h, fov, fov, theta_eye, phi_eye, scale)
     ppi = map.generate_img(img_e)
-    return omni.PPI(img_e, ppi, theta_eye, phi_eye)
+    return PPI(img_e, ppi, theta_eye, phi_eye)
 
 def generate_gazed_ppi(ppi, fov):
     pose_detector = PD(ppi.get_ppi())
@@ -209,7 +213,7 @@ def crop_person(img):
 
 @dataclass
 class PPIWithExtrinsics:
-    ppi: omni.PPI
+    ppi: PPI
     extrinsics: np.ndarray
 
 # Todo: スケールをFovで統一するか検討する
@@ -220,17 +224,18 @@ class PPIWithExtrinsics:
 def generate_ppi_from_world_point(world_point, extrinsics, img_e, fov, scale_distance=5):
     r = extrinsics[:3, :]
     t = extrinsics[3, :]
-    gaze_vec = camcal.xw_to_xc(world_point, r, t)    
-    theta_e, phi_e = omni.E2P.eye_vec_to_angle(gaze_vec)
+    gaze_vec = xw_to_xc(world_point, r, t)    
+    theta_e, phi_e = E2P.gaze_vec_to_angle(gaze_vec)
     cam_distance = np.linalg.norm(gaze_vec)
     scale = cam_distance/scale_distance
-    generator = omni.E2P(img_e.shape[1], img_e.shape[0])
+    generator = E2P(img_e.shape[1], img_e.shape[0])
     generator.generate_map(fov, fov, theta_e, phi_e, 0, scale)
     ppi = generator.generate_img(img_e)
     return ppi
 
 
 def generate_bullettime(imgs, fov, extrinsics, output_path):
+    # 注視画像の生成
     scaled_gazed_ppis_list = [generate_scaled_gazed_ppis(img, fov, output_path, f"camera_{idx:02d}") for idx, img in enumerate(imgs)]
     # 部分画像の生成
     cropped_img_map = {}
@@ -246,18 +251,21 @@ def generate_bullettime(imgs, fov, extrinsics, output_path):
             cropped_img_map[file_path_str] = PPIWithExtrinsics(scaled_gaze_ppi, extrinsics[cam_idx])
             cv2.imwrite(file_path_str, cropped_img)
 
-    cropped_img_paths = list(cropped_img_map.keys()) 
     #Person ReId
-    person_cluster = reid.OSNetReID.cluster_imgs(cropped_img_paths, min_samples=2)
+    cropped_img_paths = list(cropped_img_map.keys()) 
+    person_cluster = OSNet.cluster_imgs(cropped_img_paths, min_samples=2)
 
+    # 3次元復元
     gaze_points_of_world_coor = []
     src_img_w = imgs[0].shape[1]
     src_img_h = imgs[0].shape[0]
 
+    log = []
+
     for label, paths in person_cluster.items():
-        print(label)
+        log.append(str(label))
         for path in paths:
-            print(path)
+            log.append(path)
         if label < 0 or len(paths) < 2:
             continue
         corr_points = [ [cropped_img_map[path].ppi.get_gaze_point_of_img_coor()] 
@@ -265,18 +273,21 @@ def generate_bullettime(imgs, fov, extrinsics, output_path):
         corr_points_array = np.array(corr_points)
         extrinsics_list = [ cropped_img_map[path].extrinsics
                             for path in paths ]
-        three_d_gaze_point = tdr.reconstruct_3d_points_from_omni_directional_img(
+        three_d_gaze_point = reconstruct_3d_points_from_omni_directional_img(
             extrinsics_list, 
             corr_points_array, 
             src_img_w, 
             src_img_h   )
         gaze_points_of_world_coor.append(three_d_gaze_point.flatten())
     
+    # バレットタイム映像生成
     for idx, gaze_point in enumerate(gaze_points_of_world_coor): 
-        print(gaze_point)
+        log.append(str(gaze_point))
         bullettime = [ generate_ppi_from_world_point(gaze_point, extrinsics, img_e, 60, 3) for img_e, extrinsics in zip(imgs, extrinsics)]
         iu.save_imgs(bullettime, f"{output_path}/05_bullettime", f"camera_{idx:02d}_{{}}")
 
+    with open(f"{output_path}/log.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(log) + "\n")
 
 # Todo: 全体を分割する
 if __name__ == '__main__':
@@ -292,7 +303,7 @@ if __name__ == '__main__':
 
     imgs = iu.load_imgs(input_dir)
     extrinsics_list = []
-    extrinsics_paths = iu.glob_file_paths_from_dir(extrinsics_dir, "*extrinsics*")
+    extrinsics_paths = iu.glob_file_paths(extrinsics_dir, "*extrinsics*")
     for extrinsics_path in extrinsics_paths:
         extrinsics = np.loadtxt(extrinsics_path)
         extrinsics_list.append(extrinsics)

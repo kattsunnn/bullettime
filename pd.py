@@ -1,8 +1,9 @@
+from typing import Type
+
 import cv2
+import numpy as np
 import mediapipe.python.solutions.pose as mpPose
 import mediapipe.python.solutions.drawing_utils as mpDrawingUtils
-import numpy as np
-from typing import Type
 
 class PD:
 

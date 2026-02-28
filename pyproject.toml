@@ -1,0 +1,22 @@
+[project]
+name = "bullettime"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "camera-calibration",
+    "img-utils",
+    "mediapipe==0.10.21",
+    "omni-directional-img-utils",
+    "person-re-identification",
+    "scikit-learn>=1.8.0",
+    "three-d-reconstruction",
+]
+
+[tool.uv.sources]
+img-utils = { git = "https://github.com/kattsunnn/img_utils.git" }
+omni-directional-img-utils = { git = "https://github.com/kattsunnn/omni_directional_img_utils.git" }
+three-d-reconstruction = { git = "https://github.com/kattsunnn/three_d_reconstruction.git" }
+person-re-identification = { git = "https://github.com/kattsunnn/person_re_identification.git" }
+camera-calibration = { git = "https://github.com/kattsunnn/camera_calibration.git" }
