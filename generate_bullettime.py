@@ -194,17 +194,19 @@ def generate_scaled_gazed_ppis(img, fov, output_path, file_name_pattern):
     grouped_ppis_pose = filter_none([detect_and_draw_pose(img) for img in grouped_ppis_raw ])
     if grouped_ppis_pose: iu.save_imgs(grouped_ppis_pose, f"{output_path}/02_grouped_ppi_pose", f"{file_name_pattern}_{{}}")
 
-    # スケーリングと注視画像チェック
-    scaled_ppis = filter_none([scaling_person_by_height(grouped_ppi, fov) for grouped_ppi in grouped_ppis])
-    scaled_ppis = [ scaled_ppi for scaled_ppi in scaled_ppis if is_gaze_img(scaled_ppi.get_ppi()) ]
-    if not scaled_ppis: return None
-    # デバッグ
-    scaled_ppis_raw = [ scaled_ppi.get_ppi() for scaled_ppi in scaled_ppis ]
-    iu.save_imgs(scaled_ppis_raw, f"{output_path}/03_scaled_ppi", f"{file_name_pattern}_{{}}")
-    scaled_ppis_pose = filter_none([detect_and_draw_pose(img) for img in scaled_ppis_raw])
-    if scaled_ppis_pose: iu.save_imgs(scaled_ppis_pose, f"{output_path}/03_scaled_ppi_pose", f"{file_name_pattern}_{{}}")
+    return grouped_ppis
 
-    return scaled_ppis
+    # # スケーリングと注視画像チェック
+    # scaled_ppis = filter_none([scaling_person_by_height(grouped_ppi, fov) for grouped_ppi in grouped_ppis])
+    # scaled_ppis = [ scaled_ppi for scaled_ppi in scaled_ppis if is_gaze_img(scaled_ppi.get_ppi()) ]
+    # if not scaled_ppis: return None
+    # # デバッグ
+    # scaled_ppis_raw = [ scaled_ppi.get_ppi() for scaled_ppi in scaled_ppis ]
+    # iu.save_imgs(scaled_ppis_raw, f"{output_path}/03_scaled_ppi", f"{file_name_pattern}_{{}}")
+    # scaled_ppis_pose = filter_none([detect_and_draw_pose(img) for img in scaled_ppis_raw])
+    # if scaled_ppis_pose: iu.save_imgs(scaled_ppis_pose, f"{output_path}/03_scaled_ppi_pose", f"{file_name_pattern}_{{}}")
+
+    # return scaled_ppis
 
 def crop_person(img):
     pose_detector = PD(img)
@@ -253,7 +255,7 @@ def generate_bullettime(imgs, fov, extrinsics, output_path):
 
     #Person ReId
     cropped_img_paths = list(cropped_img_map.keys()) 
-    person_cluster = OSNet.cluster_imgs(cropped_img_paths, min_samples=2)
+    person_cluster, _ = OSNet.cluster_imgs_with_auto_eps(cropped_img_paths, min_samples=2)
 
     # 3次元復元
     gaze_points_of_world_coor = []

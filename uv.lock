@@ -1101,7 +1101,7 @@ wheels = [
 [[package]]
 name = "person-re-identification"
 version = "0.1.0"
-source = { git = "https://github.com/kattsunnn/person_re_identification.git#066fb4dd4fd930ded8d8c5fe7b93ab82a8cb537d" }
+source = { git = "https://github.com/kattsunnn/person_re_identification.git#54301825bdd6ecda991bb4744be9a1c2567e8d1c" }
 dependencies = [
     { name = "gdown" },
     { name = "numpy" },
