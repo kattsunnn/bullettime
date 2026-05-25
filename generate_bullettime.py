@@ -6,8 +6,6 @@ import numpy as np
 import cv2
 from sklearn.cluster import DBSCAN
 
-# from submodule import camera_calibration as camcal
-# from person_re_identification import osnet_reid as reid 
 import img_utils as iu
 from omni_directional_img_utils.e2p import E2P
 from omni_directional_img_utils.ppi import PPI  
@@ -126,34 +124,34 @@ def is_gaze_img(img, threshold=0.05):
 
 # Todo: FOVが低下した場合はスケールからスケーリングを行う
 # 人が透視投影画像に1/kの高さで写る。例： k=2のとき、人が透視投影画像の1/2の高さになる
-def scaling_person_by_height(ppi, fov, k=2):
-    pose_detector_for_adjusted = PD(ppi.get_ppi())
-    if pose_detector_for_adjusted.is_pose_detected():
-        minXY, maxXY = pose_detector_for_adjusted.get_boundingbox_coordinates()
-        H_b = maxXY[1] - minXY[1]
-        H_i = ppi.get_ppi().shape[0]
-        ppi_scale = H_i/(k * H_b)
+# def scaling_person_by_height(ppi, fov, k=2):
+#     pose_detector_for_adjusted = PD(ppi.get_ppi())
+#     if pose_detector_for_adjusted.is_pose_detected():
+#         minXY, maxXY = pose_detector_for_adjusted.get_boundingbox_coordinates()
+#         H_b = maxXY[1] - minXY[1]
+#         H_i = ppi.get_ppi().shape[0]
+#         ppi_scale = H_i/(k * H_b)
 
-        theta_e, phi_e = ppi.get_gaze_point_of_angle_coor()
+#         theta_e, phi_e = ppi.get_gaze_point_of_angle_coor()
 
-        # スケールに応じて解像度を自動調節
-        src_img = ppi.get_src_img()
-        scaling_fov = calc_optimal_fov_from_scale(ppi, ppi_scale)
-        # 解像度が低下する場合は変更しない
-        if scaling_fov > fov: 
-            # 画角を変えると解像度も変わる
-            scaled_ppi = generate_ppi(  src_img, 
-                                        theta_e,
-                                        phi_e,
-                                        scaling_fov)
-        else:
-            # スケールを変えると解像度は変わらない
-            scaled_ppi = generate_ppi(  src_img, 
-                                        theta_e,
-                                        phi_e,
-                                        fov,
-                                        scale=ppi_scale) 
-        return scaled_ppi
+#         # スケールに応じて解像度を自動調節
+#         src_img = ppi.get_src_img()
+#         scaling_fov = calc_optimal_fov_from_scale(ppi, ppi_scale)
+#         # 解像度が低下する場合は変更しない
+#         if scaling_fov > fov: 
+#             # 画角を変えると解像度も変わる
+#             scaled_ppi = generate_ppi(  src_img, 
+#                                         theta_e,
+#                                         phi_e,
+#                                         scaling_fov)
+#         else:
+#             # スケールを変えると解像度は変わらない
+#             scaled_ppi = generate_ppi(  src_img, 
+#                                         theta_e,
+#                                         phi_e,
+#                                         fov,
+#                                         scale=ppi_scale) 
+#         return scaled_ppi
     
 def detect_and_draw_pose(img):
     pose_detector = PD(img)
@@ -217,11 +215,6 @@ def crop_person(img):
 class PPIWithExtrinsics:
     ppi: PPI
     extrinsics: np.ndarray
-
-# Todo: スケールをFovで統一するか検討する
-# def calc_scaled_fov(ref_fov, ref_d, target_d):
-#     target_fov = 2 * np.arctan( np.tan(ref_fov/2) * (ref_d/target_d)) 
-#     return target_fov
 
 def generate_ppi_from_world_point(world_point, extrinsics, img_e, fov, scale_distance=5):
     r = extrinsics[:3, :]
