@@ -13,7 +13,8 @@ from camera_calibration.camera_calibration_utils import xw_to_xc
 from person_re_identification.osnet import OSNet
 from three_d_reconstruction import reconstruct_3d_points_from_omni_directional_img 
 
-from pd import PD
+from pd_mediapipe import PD
+from pd_yolo_pose import PD_YOLO
 
 _map_cache = {}
 
