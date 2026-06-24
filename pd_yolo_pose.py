@@ -7,11 +7,9 @@ class PD_YOLO:
         self.input_size = input_size
         self.conf = conf
         self.results = None
-        self.img = None
 
-    def detect_pose(self, img):
-        self.img = img
-        self.results = self.model(img, imgsz=self.input_size, conf=self.conf, verbose=False)
+    def detect_pose(self, imgs):
+        self.results = self.model(imgs, imgsz=self.input_size, conf=self.conf, verbose=False)
         return self.results
 
     # def _get_detected_results(self):
@@ -22,16 +20,16 @@ class PD_YOLO:
     #             yield result
                  
     # 指定したキーポイントインデックスの座標を収集 
-    def get_landmark_points(self, keypoint_idx: int = 0) -> list:
-        target_points = []
-        for result in self.results:
+    def get_landmark_points(self, keypoint_idx: int = 0) -> dict:
+        target_points_dict = {} 
+        for idx, result in enumerate(self.results):
             people_kps = result.keypoints.data
-            if len(people_kps) == 0:
-                continue
-            else:
-                target_kps = people_kps[:, keypoint_idx, :].cpu().numpy()
-                target_points.append(target_kps)
-        return np.vstack(target_points)
+            # キーポイントが存在すれば
+            if len(people_kps) > 0:
+                target_kps = people_kps[:, keypoint_idx, :].cpu().numpy() # keypoint_idxのkpsのみ抜き取る
+                target_kps = target_kps.reshape(-1, 3) # ベクトルが2次元になることを保証
+                target_points_dict[idx] = target_kps
+        return target_points_dict
 
     # 検出した情報を画像にプロット
     def plot_detected_poses(self, 
@@ -54,6 +52,27 @@ class PD_YOLO:
                 )
                 plotted_imgs.append(plotted_img)
         return plotted_imgs
+    
+# 検出した人物のバウンディングボックス画像を切り出す
+    def get_cropped_people(self) -> dict:
+        cropped_imgs_dict = {}
+
+        for idx, result in enumerate(self.results):
+            # 元の画像（Numpy配列）を取得
+            orig_img = result.orig_img
+            # 検出されたバウンディングボックスを取得
+            boxes = result.boxes.xyxy.cpu().numpy()
+            
+            cropped_list = []
+            for box in boxes:
+                # 座標を整数(int)に変換（スライスには整数が必要なため）
+                x1, y1, x2, y2 = map(int, box)
+                # Numpyのスライス機能を使って画像を切り抜き: image[y_start:y_end, x_start:x_end]
+                cropped_img = orig_img[y1:y2, x1:x2]
+                cropped_list.append(cropped_img)
+            cropped_imgs_dict[idx] = cropped_list
+            
+        return cropped_imgs_dict
 
 if __name__ == "__main__":
     import argparse
@@ -70,7 +89,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     input_path = Path(args.input_path)
-    pose_detector = PD_YOLO(input_size=1960)
+    pose_detector = PD_YOLO(input_size=2000)
     results = pose_detector.detect_pose(input_path)
     target_points = pose_detector.get_landmark_points()
     plotted_imgs = pose_detector.plot_detected_poses()

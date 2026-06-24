@@ -1,307 +1,278 @@
+# 外部ライブラリ
+import argparse
+import copy
 from dataclasses import dataclass
-# from typing import List, Tuple, Optional
 from pathlib import Path
-
 import numpy as np
 import cv2
-from sklearn.cluster import DBSCAN
-
+import os
+import json
+# 自作ライブラリ
 import img_utils as iu
 from omni_directional_img_utils.e2p import E2P
 from omni_directional_img_utils.ppi import PPI  
-from camera_calibration.camera_calibration_utils import xw_to_xc
-from person_re_identification.osnet import OSNet
-from three_d_reconstruction import reconstruct_3d_points_from_omni_directional_img 
 
-from pd_mediapipe import PD
 from pd_yolo_pose import PD_YOLO
 
+@dataclass
+class PPIRecord:
+    ppi_id: int
+    detection_point_ppi: np.ndarray | None = None
+    detection_point_omni: np.ndarray | None = None
+    detection_conf: float | None = None
+    bbox_xyxy: tuple[float, float, float, float] | None = None
+@dataclass
+class CropRecord:
+    camera_id: int
+    crop_img: np.ndarray | None = None
+    detection_point_omni: np.ndarray | None = None 
+# グローバル変数
 _map_cache = {}
-
-def get_or_create_map(src_img_w, src_img_h, fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, scale=1):
-    cache_key = (src_img_w, src_img_h, fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, scale)
+# 透視投影画像のマップを作成．生成を効率化
+def get_or_create_ppi_map(src_img_w, src_img_h, fov_w, fov_h, eye_w, eye_h, scale=1):
+    cache_key = (src_img_w, src_img_h, fov_w, fov_h, eye_w, eye_h, scale)
     
     if cache_key not in _map_cache:
         map = E2P(src_img_w, src_img_h)
-        map.generate_map(fov_w_deg, fov_h_deg, angle_u_deg, angle_v_deg, 0, scale)
+        map.generate_map(fov_w, fov_h, eye_w, eye_h, 0, scale)
         _map_cache[cache_key] = map
     
     return _map_cache[cache_key]
 
-# ToDo: 透視投影画像生成するマップは１回の計算にできそう
-# 透視投影画像群の生成
-def generate_front_ppis(img_e, fov, overlap=0.5):
+# 正面方向の透視投影画像群の生成
+def generate_front_ppis(src_img, fov_w, fov_h=None, overlap=0.25, range_w=90, range_h=60):
     # 使用する全方位カメラの解像度
-    img_e_w = img_e.shape[1]
-    img_e_h = img_e.shape[0]
+    src_img_w = src_img.shape[1]
+    src_img_h = src_img.shape[0]
+    if fov_h is None:
+        fov_h = fov_w
     # 透視投影画像を生成する視線角度の設定
-    THETA_RANGE = 90
-    PHI_RANGE = 60
-    angle_step = fov * (1 - overlap)
-    first_step = fov/2
-    theta_eyes = np.arange(-THETA_RANGE + first_step, THETA_RANGE, angle_step)
-    phi_eyes = np.arange(PHI_RANGE - first_step, -PHI_RANGE, -angle_step)
+    step_w = fov_w * (1 - overlap)
+    step_h = fov_h * (1 - overlap)
+    first_step_w = fov_w / 2
+    first_step_h = fov_h / 2
+    eyes_w = np.arange(-range_w + first_step_w, range_w, step_w)
+    eyes_h= np.arange(-range_h + first_step_h, range_h, step_h)
 
     ppis = []
 
-    for j, phi_eye in enumerate(phi_eyes):
-        for i, theta_eye in enumerate(theta_eyes):
+    for eye_h in eyes_h:
+        for eye_w in eyes_w:
             # 透視投影画像の生成
-            map = get_or_create_map(img_e_w, img_e_h, fov, fov, theta_eye, phi_eye)
-            ppi = map.generate_img(img_e)
-            ppi = PPI(img_e, ppi, theta_eye, phi_eye)
+            map = get_or_create_ppi_map(src_img_w, src_img_h, fov_w, fov_h, eye_w, eye_h)
+            ppi = map.generate_img(src_img)
+            ppi = PPI(src_img, ppi, eye_w, eye_h)
             ppis.append(ppi)
     return ppis
 
-# 透視投影画像を生成
-def generate_ppi(img_e, theta_eye, phi_eye, fov, scale=1):
-    img_e_w = img_e.shape[1]
-    img_e_h = img_e.shape[0]
-    map = get_or_create_map(img_e_w, img_e_h, fov, fov, theta_eye, phi_eye, scale)
-    ppi = map.generate_img(img_e)
-    return PPI(img_e, ppi, theta_eye, phi_eye)
-
-def generate_gazed_ppi(ppi, fov):
-    pose_detector = PD(ppi.get_ppi())
-    if pose_detector.is_pose_detected():
-        landmark_coordinate_x, landmark_coordinate_y = pose_detector.get_landmark_coordinate()
-        theta_e, phi_e = ppi.convert_ppi_point_to_angle_coor(landmark_coordinate_x, landmark_coordinate_y)
-        gazed_ppi = generate_ppi(ppi.get_src_img(), theta_e, phi_e, fov)
-        return gazed_ppi
-
-# スケールから適切なFOVを計算。
-def calc_optimal_fov_from_scale(ppi, scale):
-    focal_length = ppi.get_focal_length()
-    w = ppi.get_ppi().shape[1]
-    s_p = scale
-    fov_rad = np.arctan2(w, (focal_length*s_p))
-    fov_deg = np.rad2deg(fov_rad)
-    return fov_deg
-
-# Todo: 入力を画像に修正
-def get_gaze_point_on_omni(ppi, gaze_point_num=0):
-    pose_detector_for_ppi = PD(ppi.get_ppi())
-    if pose_detector_for_ppi.is_pose_detected():
-        # 注視点（鼻）の座標を取得
-        landmark_coordinate_x, landmark_coordinate_y = pose_detector_for_ppi.get_landmark_coordinate(gaze_point_num)
-        # 注視点の全方位画像上の角度座標を取得
-        theta_e, phi_e = ppi.convert_ppi_point_to_angle_coor(landmark_coordinate_x, landmark_coordinate_y)
-    return theta_e, phi_e
-
-def grouping_points(points, eps=5, min_samples=1):
-    if not isinstance(points, np.ndarray):
-        raise TypeError("pointsがNumPy配列ではありません。np.ndarrayを渡してください。")
-    if points.size == 0:
-        return None
-    dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-    # グルーピングしたラベル配列を出力。例：[0, 0, 1, 1, -1]（ラベルが -1 の場合はノイズ）
-    labels = dbscan.fit_predict(points)
-    # 点をグループ分けした辞書を作成。例：｛　0: array([[x1, y1], [x2, y2]])　｝
-    grouped_points = {}
-    for label in set(labels):
-        grouped_points[label] = points[labels == label]
-    return grouped_points
-
-def centering_points(points):
-    if points.shape[0] == 0:
-        return None
-    centered_point = np.mean(points, axis=0)
-    return centered_point
-
-def is_gaze_img(img, threshold=0.05):
-    pose_detector = PD(img)
-    if not pose_detector.is_pose_detected():
-        return False
-    
-    gaze_point = np.array([pose_detector.get_landmark_coordinate()])
-    center = np.array([img.shape[1] / 2, img.shape[0] / 2])
-    # 対角長を使って距離を計算
-    dist = np.linalg.norm(gaze_point - center)
-    diag = np.linalg.norm(np.array([img.shape[1], img.shape[0]]))
-    normalized_dist = dist / diag
-    if normalized_dist > threshold:
-        return False
-    return True
-
-# Todo: FOVが低下した場合はスケールからスケーリングを行う
-# 人が透視投影画像に1/kの高さで写る。例： k=2のとき、人が透視投影画像の1/2の高さになる
-# def scaling_person_by_height(ppi, fov, k=2):
-#     pose_detector_for_adjusted = PD(ppi.get_ppi())
-#     if pose_detector_for_adjusted.is_pose_detected():
-#         minXY, maxXY = pose_detector_for_adjusted.get_boundingbox_coordinates()
-#         H_b = maxXY[1] - minXY[1]
-#         H_i = ppi.get_ppi().shape[0]
-#         ppi_scale = H_i/(k * H_b)
-
-#         theta_e, phi_e = ppi.get_gaze_point_of_angle_coor()
-
-#         # スケールに応じて解像度を自動調節
-#         src_img = ppi.get_src_img()
-#         scaling_fov = calc_optimal_fov_from_scale(ppi, ppi_scale)
-#         # 解像度が低下する場合は変更しない
-#         if scaling_fov > fov: 
-#             # 画角を変えると解像度も変わる
-#             scaled_ppi = generate_ppi(  src_img, 
-#                                         theta_e,
-#                                         phi_e,
-#                                         scaling_fov)
-#         else:
-#             # スケールを変えると解像度は変わらない
-#             scaled_ppi = generate_ppi(  src_img, 
-#                                         theta_e,
-#                                         phi_e,
-#                                         fov,
-#                                         scale=ppi_scale) 
-#         return scaled_ppi
-    
-def detect_and_draw_pose(img):
-    pose_detector = PD(img)
-    if pose_detector.is_pose_detected():
-        img_pose = pose_detector.draw_pose_landmarks()
-        return img_pose
-
-def filter_none(lst):
-    return [ elem for elem in lst if elem is not None ]
-
-def generate_scaled_gazed_ppis(img, fov, output_path, file_name_pattern):
-    # 正面方向の透視投影画像を生成
-    ppis = generate_front_ppis(img, fov)
-    # デバッグ
-    if ppis:
-        ppis_raw = [ppi.get_ppi() for ppi in ppis]
-        iu.save_imgs(ppis_raw, f"{output_path}/00_ppi", f"{file_name_pattern}_{{}}")
-        ppis_pose = filter_none([detect_and_draw_pose(img) for img in ppis_raw])
-        if ppis_pose: iu.save_imgs(ppis_pose, f"{output_path}/00_ppi_pose", f"{file_name_pattern}_{{}}")
-
-    # 注視画像の生成と注視画像チェック
-    gazed_ppis = filter_none([generate_gazed_ppi(ppi, fov) for ppi in ppis ])
-    checked_gazed_ppis = [ gazed_ppi for gazed_ppi in gazed_ppis if is_gaze_img(gazed_ppi.get_ppi())]
-    if not checked_gazed_ppis: return None
-    # デバック
-    checked_gazed_ppis_raw = [ checked_gazed_ppi.get_ppi() for checked_gazed_ppi in checked_gazed_ppis]        
-    iu.save_imgs(checked_gazed_ppis_raw, f"{output_path}/01_checked_gazed_ppi", f"{file_name_pattern}_{{}}")
-
-    # 注視画像を生成
-    gaze_point_candidates = filter_none([get_gaze_point_on_omni(checked_gazed_ppi) for checked_gazed_ppi in checked_gazed_ppis])
-    if not gaze_point_candidates: return None
-    grouped_points = grouping_points(np.array(gaze_point_candidates))
-    centered_points = [centering_points(grouped_point) for grouped_point in grouped_points.values()]
-    grouped_ppis = [ generate_ppi(img, cp[0], cp[1], fov) for cp in centered_points ]
-    # デバッグ
-    grouped_ppis_raw = [ grouped_ppi.get_ppi() for grouped_ppi in grouped_ppis ]
-    iu.save_imgs(grouped_ppis_raw , f"{output_path}/02_grouped_ppi", f"{file_name_pattern}_{{}}")
-    grouped_ppis_pose = filter_none([detect_and_draw_pose(img) for img in grouped_ppis_raw ])
-    if grouped_ppis_pose: iu.save_imgs(grouped_ppis_pose, f"{output_path}/02_grouped_ppi_pose", f"{file_name_pattern}_{{}}")
-
-    return grouped_ppis
-
-    # # スケーリングと注視画像チェック
-    # scaled_ppis = filter_none([scaling_person_by_height(grouped_ppi, fov) for grouped_ppi in grouped_ppis])
-    # scaled_ppis = [ scaled_ppi for scaled_ppi in scaled_ppis if is_gaze_img(scaled_ppi.get_ppi()) ]
-    # if not scaled_ppis: return None
-    # # デバッグ
-    # scaled_ppis_raw = [ scaled_ppi.get_ppi() for scaled_ppi in scaled_ppis ]
-    # iu.save_imgs(scaled_ppis_raw, f"{output_path}/03_scaled_ppi", f"{file_name_pattern}_{{}}")
-    # scaled_ppis_pose = filter_none([detect_and_draw_pose(img) for img in scaled_ppis_raw])
-    # if scaled_ppis_pose: iu.save_imgs(scaled_ppis_pose, f"{output_path}/03_scaled_ppi_pose", f"{file_name_pattern}_{{}}")
-
-    # return scaled_ppis
-
-def crop_person(img):
-    pose_detector = PD(img)
-    if pose_detector.is_pose_detected():
-        return pose_detector.crop_boundingbox()
-
-@dataclass
-class PPIWithExtrinsics:
-    ppi: PPI
-    extrinsics: np.ndarray
-
-def generate_ppi_from_world_point(world_point, extrinsics, img_e, fov, scale_distance=5):
-    r = extrinsics[:3, :]
-    t = extrinsics[3, :]
-    gaze_vec = xw_to_xc(world_point, r, t)    
-    theta_e, phi_e = E2P.gaze_vec_to_angle(gaze_vec)
-    cam_distance = np.linalg.norm(gaze_vec)
-    scale = cam_distance/scale_distance
-    generator = E2P(img_e.shape[1], img_e.shape[0])
-    generator.generate_map(fov, fov, theta_e, phi_e, 0, scale)
-    ppi = generator.generate_img(img_e)
-    return ppi
 
 
-def generate_bullettime(imgs, fov, extrinsics, output_path):
-    # 注視画像の生成
-    scaled_gazed_ppis_list = [generate_scaled_gazed_ppis(img, fov, output_path, f"camera_{idx:02d}") for idx, img in enumerate(imgs)]
-    # 部分画像の生成
-    cropped_img_map = {}
-    for cam_idx, scaled_gaze_ppis in enumerate(scaled_gazed_ppis_list):
-        if scaled_gaze_ppis is None: continue
-        for num_idx, scaled_gaze_ppi in enumerate(scaled_gaze_ppis):
-            cropped_img = crop_person(scaled_gaze_ppi.get_ppi())
-            file_name = f"camera_{cam_idx:02d}_{num_idx:02d}.jpg"
-            output_dir = Path(output_path) / "04_cropped"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            file_path =  output_dir / file_name
-            file_path_str = str(file_path)
-            cropped_img_map[file_path_str] = PPIWithExtrinsics(scaled_gaze_ppi, extrinsics[cam_idx])
-            cv2.imwrite(file_path_str, cropped_img)
 
-    #Person ReId
-    cropped_img_paths = list(cropped_img_map.keys()) 
-    person_cluster, _ = OSNet.cluster_imgs_with_auto_eps(cropped_img_paths, min_samples=2)
+def create_ppirecords(detection_results, keypoint_idx: int = 0) -> list[PPIRecord]:
+    ppi_records: list[PPIRecord] = []
 
-    # 3次元復元
-    gaze_points_of_world_coor = []
-    src_img_w = imgs[0].shape[1]
-    src_img_h = imgs[0].shape[0]
-
-    log = []
-
-    for label, paths in person_cluster.items():
-        log.append(str(label))
-        for path in paths:
-            log.append(path)
-        if label < 0 or len(paths) < 2:
+    for ppi_id, result in enumerate(detection_results):
+        if result.boxes is None:
             continue
-        corr_points = [ [cropped_img_map[path].ppi.get_gaze_point_of_img_coor()] 
-                        for path in paths   ]
-        corr_points_array = np.array(corr_points)
-        extrinsics_list = [ cropped_img_map[path].extrinsics
-                            for path in paths ]
-        three_d_gaze_point = reconstruct_3d_points_from_omni_directional_img(
-            extrinsics_list, 
-            corr_points_array, 
-            src_img_w, 
-            src_img_h   )
-        gaze_points_of_world_coor.append(three_d_gaze_point.flatten())
+        boxes = result.boxes.xyxy.cpu().numpy()
+        keypoints = result.keypoints.data.cpu().numpy()
+
+        for bbox_xyxy, detection_kps in zip(boxes, keypoints):
+            detection_point = detection_kps[keypoint_idx, :]
+
+            ppi_records.append(
+                PPIRecord(
+                    ppi_id=ppi_id,
+                    detection_point_ppi=np.array(detection_point[:2], dtype=float),
+                    detection_conf=float(detection_point[2]),
+                    bbox_xyxy=tuple(float(value) for value in bbox_xyxy),
+                )
+            )
+
+    return ppi_records
+
+def add_omni_point(ppis: list[PPI], ppi_records: list[PPIRecord]) -> list[PPIRecord]:
+    for ppi_record in ppi_records:
+        if ppi_record.ppi_id >= len(ppis):
+            continue
+
+        ppi = ppis[ppi_record.ppi_id]
+        ppi_record.detection_point_omni = np.array(
+            ppi.convert_ppi_point_to_angle_coor(
+                ppi_record.detection_point_ppi[0],
+                ppi_record.detection_point_ppi[1],
+            ),
+            dtype=float,
+        )
+
+    return ppi_records
+
+def distance_based_nms(ppi_records: list[PPIRecord], dist_th: float = 5.0) -> list[PPIRecord]:
+    if ppi_records is None or len(ppi_records) == 0:
+        return []
+    if dist_th < 0:
+        raise ValueError(f"距離の閾値 (dist_th) には 0 以上の数値を指定してください。指定値: {dist_th}")
+
+    valid_records = [
+        ppi_record
+        for ppi_record in ppi_records
+        if ppi_record.detection_point_omni is not None and ppi_record.detection_conf is not None
+    ]
+    if len(valid_records) == 0:
+        return []
+
+    sorted_indices = np.array([ppi_record.detection_conf for ppi_record in valid_records]).argsort()[::-1]
+    candidates_records = [valid_records[idx] for idx in sorted_indices]
+    selected_records: list[PPIRecord] = []
+
+    while len(candidates_records) > 0:
+        p_max = candidates_records[0]
+        selected_records.append(p_max)
+        if len(candidates_records) == 1:
+            break
+
+        remaining_records = candidates_records[1:]
+        p_max_point = p_max.detection_point_omni[:2]
+        remaining_points = np.array([record.detection_point_omni[:2] for record in remaining_records], dtype=float)
+        diff = remaining_points - p_max_point
+        distances = np.linalg.norm(diff, axis=1)
+        keep_mask = distances >= dist_th
+        candidates_records = [record for record, keep in zip(remaining_records, keep_mask) if keep]
+
+    return selected_records
+
+def print_ppirecords(ppi_records: list[PPIRecord]) -> None:
+    print(f"PPIRecord count: {len(ppi_records)}")
+    for ppi_record in ppi_records:
+        print(
+            "PPIRecord(" 
+            f"ppi_id={ppi_record.ppi_id}, "
+            f"detection_point_ppi={ppi_record.detection_point_ppi}, "
+            f"detection_point_omni={ppi_record.detection_point_omni}, "
+            f"detection_conf={ppi_record.detection_conf}, "
+            f"bbox_xyxy={ppi_record.bbox_xyxy})"
+        )
+
+
+def ppi_record_to_dict(ppi_record: PPIRecord) -> dict:
+    return {
+        "ppi_id": ppi_record.ppi_id,
+        "detection_point_ppi": None if ppi_record.detection_point_ppi is None else ppi_record.detection_point_ppi.tolist(),
+        "detection_point_omni": None if ppi_record.detection_point_omni is None else ppi_record.detection_point_omni.tolist(),
+        "detection_conf": ppi_record.detection_conf,
+        "bbox_xyxy": None if ppi_record.bbox_xyxy is None else list(ppi_record.bbox_xyxy),
+    }
+
+
+def save_ppirecords_json(
+    output_path: str,
+    file_name_pattern: str,
+    *,
+    added_omni_records: list[PPIRecord],
+    filtered_records: list[PPIRecord],
+) -> str:
+    os.makedirs(f"{output_path}/02_data", exist_ok=True)
+    save_file_path = f"{output_path}/02_data/{file_name_pattern}_ppi_records.json"
+    save_data = {
+        "added_omni": [ppi_record_to_dict(ppi_record) for ppi_record in added_omni_records],
+        "filtered_by_nms": [ppi_record_to_dict(ppi_record) for ppi_record in filtered_records],
+    }
+
+    with open(save_file_path, "w", encoding="utf-8") as f:
+        json.dump(save_data, f, indent=4, ensure_ascii=False)
+
+    print(f"PPIRecord JSON saved to: {save_file_path}")
+    return save_file_path
+
+def generate_ppi(src_img, fov_w, fov_h, eye_w, eye_h, scale=1):
+    src_img_w = src_img.shape[1]
+    src_img_h = src_img.shape[0]
+    map = get_or_create_ppi_map(src_img_w, src_img_h, fov_w, fov_h, eye_w, eye_h, scale)
+    ppi = map.generate_img(src_img)
+    return PPI(src_img, ppi, eye_w, eye_h)
+
+def convert_ppi_record_to_crop(camera_id: int, ppi_img: np.ndarray, ppi_record: PPIRecord) -> CropRecord:
+    if ppi_record.bbox_xyxy is None:
+        return CropRecord(camera_id=camera_id, detection_point_omni=ppi_record.detection_point_omni)
+    # 座標を整数に変換
+    x1, y1, x2, y2 = map(int, ppi_record.bbox_xyxy)
+    # 画像の範囲外アクセスを防ぐ安全処理
+    h, w = ppi_img.shape[:2]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w, x2), min(h, y2)
+    # 画像の切り抜き
+    crop_img = ppi_img[y1:y2, x1:x2]
     
-    # バレットタイム映像生成
-    for idx, gaze_point in enumerate(gaze_points_of_world_coor): 
-        log.append(str(gaze_point))
-        bullettime = [ generate_ppi_from_world_point(gaze_point, extrinsics, img_e, 60, 3) for img_e, extrinsics in zip(imgs, extrinsics)]
-        iu.save_imgs(bullettime, f"{output_path}/05_bullettime", f"camera_{idx:02d}_{{}}")
+    return CropRecord(
+        camera_id=camera_id,
+        crop_img=crop_img,
+        detection_point_omni=ppi_record.detection_point_omni
+    )
 
-    with open(f"{output_path}/log.txt", "w", encoding="utf-8") as f:
-        f.write("\n".join(log) + "\n")
+def find_people_in_omni(camera_id: int, src_img, output_path,
+                        *, fov_w=60, fov_h=60, overlap=0.25, range_w=90 , range_h=60,
+                        input_size=1504, keypoint_idx=0, dist_th=5.0) -> list[CropRecord]:
+    file_name_pattern = f"camera_{camera_id:02d}"                   
+    # 正面方向の透視投影画像を生成
+    ppis = generate_front_ppis(src_img, fov_w, fov_h, overlap, range_w, range_h)
+    ppis_raw = [ppi.get_ppi() for ppi in ppis] 
+    iu.save_imgs(ppis_raw, f"{output_path}/00_ppi", f"{file_name_pattern}_{{}}")
+    # 骨格検出
+    pose_detector = PD_YOLO(input_size=input_size) 
+    detection_results = pose_detector.detect_pose(ppis_raw)
+    plotted_ppis = pose_detector.plot_detected_poses()
+    iu.save_imgs(plotted_ppis, f"{output_path}/01_plotted_ppi", f"{file_name_pattern}_{{}}")
+    # 注視点の抽出
+    ppi_records = create_ppirecords(detection_results, keypoint_idx=keypoint_idx)
+    ppi_records_added_omni = add_omni_point(ppis, ppi_records)
+    ppi_records_before_nms = copy.deepcopy(ppi_records_added_omni) # コピーが残らないから必要？
+    ppi_records_filterd_by_nms = distance_based_nms(ppi_records_added_omni, dist_th=dist_th)
+    save_ppirecords_json(
+        output_path,
+        file_name_pattern,
+        added_omni_records=ppi_records_before_nms,
+        filtered_records=ppi_records_filterd_by_nms,
+    )
+    #局所画像生成
+    crop_records: list[CropRecord] = []
+    for record in ppi_records_filterd_by_nms:
+        ppi_img = ppis_raw[record.ppi_id]
+        crop_record = convert_ppi_record_to_crop(camera_id, ppi_img, record)
+        crop_records.append(crop_record)
+    # 局所画像デバック
+    crop_imgs_to_save = [
+        record.crop_img for record in crop_records 
+        if record.crop_img is not None and record.crop_img.size > 0
+    ]
+    if len(crop_imgs_to_save) > 0:
+        iu.save_imgs(crop_imgs_to_save, f"{output_path}/03_crop", f"{file_name_pattern}_{{}}")
 
-# Todo: 全体を分割する
-if __name__ == '__main__':
+    return crop_records
 
-    import glob
-    import os
-    import sys
+def generate_bullttime(src_imgs: list[np.ndarray], output_path: str) -> list[CropRecord]:
+    all_crop_records: list[CropRecord] = []
+    for camera_id, src_img in enumerate(src_imgs):
+        
+        crop_records = find_people_in_omni(
+            camera_id=camera_id,
+            src_img=src_img,
+            output_path=output_path
+        )
+        all_crop_records.extend(crop_records)
 
-    input_dir = sys.argv[1]
-    output_dir = sys.argv[2]
-    extrinsics_dir = sys.argv[3]
-    fov = float(sys.argv[4])
+    return None
+    
 
-    imgs = iu.load_imgs(input_dir)
-    extrinsics_list = []
-    extrinsics_paths = iu.glob_file_paths(extrinsics_dir, "*extrinsics*")
-    for extrinsics_path in extrinsics_paths:
-        extrinsics = np.loadtxt(extrinsics_path)
-        extrinsics_list.append(extrinsics)
+def main():
+    parser = argparse.ArgumentParser(description="単一画像から透視投影画像群を生成する")
+    parser.add_argument("-i", "--input", required=True, help="入力画像のパス")
+    parser.add_argument("-o", "--output", required=True, help="出力先ディレクトリ")
+    args = parser.parse_args()
 
-    generate_bullettime(imgs, fov, extrinsics_list, output_dir)
+    input_path = Path(args.input)
+    src_imgs = iu.load_imgs(input_path) 
+
+    all_crop_records = generate_bullttime(src_imgs, args.output)
+
+if __name__ == "__main__":
+    main()
