@@ -283,6 +283,7 @@ def find_people_in_omni(camera_id: int, src_img, output_path,
         if crop_record is not None: crop_records.append(crop_record)
     return crop_records
 
+# 入力パラメータの設定，Osnet，スケーリング等
 def generate_bullttime(src_imgs: list[np.ndarray], output_path: str, extrinsics: np.ndarray) -> list[CropRecord]:
     # 局所画像生成
     all_crop_records: list[CropRecord] = []
