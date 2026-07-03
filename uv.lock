@@ -1059,7 +1059,7 @@ wheels = [
 [[package]]
 name = "omni-directional-img-utils"
 version = "0.1.0"
-source = { git = "https://github.com/kattsunnn/omni_directional_img_utils.git#aa3e91e1efef0c58ad91865466f60c0336b0367c" }
+source = { git = "https://github.com/kattsunnn/omni_directional_img_utils.git#abaf9c7104198cf2b6af6fd1bd8bf31b303d8b03" }
 dependencies = [
     { name = "numpy" },
     { name = "opencv-python" },

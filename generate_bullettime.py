@@ -23,7 +23,9 @@ class PPIRecord:
     detection_point_ppi: np.ndarray | None = None
     detection_point_omni_deg: np.ndarray | None = None
     detection_conf: float | None = None
+    bbox_conf: float | None = None
     bbox_xyxy: tuple[float, float, float, float] | None = None
+    bbox_xyxy_omni_deg: tuple[float, float, float, float] | None = None
 @dataclass
 class CropRecord:
     camera_id: int
@@ -82,9 +84,10 @@ def create_ppirecords(detection_results, keypoint_idx: int = 0) -> list[PPIRecor
         if result.boxes is None:
             continue
         boxes = result.boxes.xyxy.cpu().numpy()
+        confs = result.boxes.conf.cpu().numpy()
         keypoints = result.keypoints.data.cpu().numpy()
 
-        for bbox_xyxy, detection_kps in zip(boxes, keypoints):
+        for bbox_xyxy, detection_kps, box_conf in zip(boxes, keypoints, confs):
             detection_point = detection_kps[keypoint_idx, :]
 
             ppi_records.append(
@@ -92,6 +95,7 @@ def create_ppirecords(detection_results, keypoint_idx: int = 0) -> list[PPIRecor
                     ppi_id=ppi_id,
                     detection_point_ppi=np.array(detection_point[:2], dtype=float),
                     detection_conf=float(detection_point[2]),
+                    bbox_conf=float(box_conf),
                     bbox_xyxy=tuple(float(value) for value in bbox_xyxy),
                 )
             )
@@ -104,13 +108,25 @@ def add_omni_point(ppis: list[PPI], ppi_records: list[PPIRecord]) -> list[PPIRec
             continue
 
         ppi = ppis[ppi_record.ppi_id]
-        ppi_record.detection_point_omni_deg = np.array(
-            ppi.convert_ppi_point_to_src_angle_coor(
-                ppi_record.detection_point_ppi[0],
-                ppi_record.detection_point_ppi[1],
-            ),
-            dtype=float,
-        )
+
+        if ppi_record.detection_point_ppi is not None:
+            ppi_record.detection_point_omni_deg = np.array(
+                ppi.convert_ppi_point_to_src_angle_coor(
+                    ppi_record.detection_point_ppi[0],
+                    ppi_record.detection_point_ppi[1],
+                ),
+                dtype=float,
+            )
+        if ppi_record.bbox_xyxy is not None:
+            x1, y1, x2, y2 = ppi_record.bbox_xyxy
+            x1_deg, y1_deg = ppi.convert_ppi_point_to_src_angle_coor(x1, y1)
+            x2_deg, y2_deg = ppi.convert_ppi_point_to_src_angle_coor(x2, y2)
+            ppi_record.bbox_xyxy_omni_deg = (
+                float(x1_deg),
+                float(y1_deg),
+                float(x2_deg),
+                float(y2_deg),
+            )
 
     return ppi_records
 
@@ -134,8 +150,8 @@ def distance_based_nms(ppi_records: list[PPIRecord], dist_th: float = 5.0) -> li
 
     while len(candidates_records) > 0:
         p_max = candidates_records[0]
-        selected_records.append(p_max)
         if len(candidates_records) == 1:
+            selected_records.append(p_max)
             break
         remaining_records = candidates_records[1:]
         p_max_point = p_max.detection_point_omni_deg[:2]
@@ -143,13 +159,28 @@ def distance_based_nms(ppi_records: list[PPIRecord], dist_th: float = 5.0) -> li
         diff = remaining_points - p_max_point
         distances = np.linalg.norm(diff, axis=1)
         keep_mask = distances >= dist_th
+        # keep_maskでFalseに該当するレコードを集約
+        suppressed_records = [record for record, keep in zip(remaining_records, keep_mask) if not keep]
         candidates_records = [record for record, keep in zip(remaining_records, keep_mask) if keep]
+        # p_maxと集約したレコードのbbox_confを比較して，bbox_confが最大のレコードのbbox_xyxy (およびbbox_conf) をp_maxに置き換え
+        group = [p_max] + suppressed_records
+        best_bbox_record = max(
+            group,
+            key=lambda r: r.bbox_conf if r.bbox_conf is not None else -1.0
+        )
+
+        p_max.bbox_conf = best_bbox_record.bbox_conf
+        p_max.bbox_xyxy = best_bbox_record.bbox_xyxy
+        p_max.bbox_xyxy_omni_deg = best_bbox_record.bbox_xyxy_omni_deg
+        
+        selected_records.append(p_max)
 
     return selected_records
 
 
 def convert_ppi_record_to_crop(camera_id: int, ppis: list[PPI], ppi_record: PPIRecord, save_path: str) -> CropRecord:
-    if ppi_record.ppi_id >= len(ppis) or ppi_record.bbox_xyxy is None:
+    if ppi_record.ppi_id >= len(ppis) or ppi_record.bbox_xyxy_omni_deg is None:
+        print(f"[Debug] Skipping: ppi_id={ppi_record.ppi_id}, bbox_xyxy_omni_deg={getattr(ppi_record, 'bbox_xyxy_omni_deg', None)}")
         return None
         
     ppi_obj = ppis[ppi_record.ppi_id]
@@ -157,16 +188,29 @@ def convert_ppi_record_to_crop(camera_id: int, ppis: list[PPI], ppi_record: PPIR
     u, v = ppi_obj.convert_ppi_point_to_src_img_coor(ppi_record.detection_point_ppi[0], ppi_record.detection_point_ppi[1])
     detection_point_omni_uv = np.array([u, v])
     
-    x1, y1, x2, y2 = map(int, ppi_record.bbox_xyxy)
+    # bbox_xyxy_omni_deg から xyxy を取得して ppi 座標に変換
+    x1_deg, y1_deg, x2_deg, y2_deg = ppi_record.bbox_xyxy_omni_deg
+    x1_ppi, y1_ppi = ppi_obj.convert_src_angle_coor_to_ppi_point(x1_deg, y1_deg)
+    x2_ppi, y2_ppi = ppi_obj.convert_src_angle_coor_to_ppi_point(x2_deg, y2_deg)
     h, w = ppi_img.shape[:2]
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
+    x1, y1 = max(0, x1_ppi), max(0, y1_ppi)
+    x2, y2 = min(w, x2_ppi), min(h, y2_ppi)
     # 画像の切り抜き
     crop_img = ppi_img[y1:y2, x1:x2]
+    
+    print(f"[Debug] camera_id: {camera_id}, ppi_id: {ppi_record.ppi_id}")
+    print(f"        omni_deg: ({x1_deg:.2f}, {y1_deg:.2f}, {x2_deg:.2f}, {y2_deg:.2f})")
+    print(f"        ppi_point (raw float): ({x1_ppi:.2f}, {y1_ppi:.2f}, {x2_ppi:.2f}, {y2_ppi:.2f})")
+    print(f"        ppi_point (int cropped): ({x1}, {y1}, {x2}, {y2}), ppi_img_shape: (w={w}, h={h})")
+    print(f"        crop_img size: {crop_img.size if crop_img is not None else 0}, save_path: {save_path}")
+
     # 画像の保存
     if crop_img.size > 0:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         cv2.imwrite(save_path, crop_img)
+        print(f"[Debug] Saved crop image to {save_path}")
+    else:
+        print(f"[Debug] Crop image size is 0, not saving.")
     
     return CropRecord(
         camera_id=camera_id,
@@ -183,7 +227,9 @@ def print_ppirecords(ppi_records: list[PPIRecord]) -> None:
             f"detection_point_ppi={ppi_record.detection_point_ppi}, "
             f"detection_point_omni_deg={ppi_record.detection_point_omni_deg}, "
             f"detection_conf={ppi_record.detection_conf}, "
-            f"bbox_xyxy={ppi_record.bbox_xyxy})"
+            f"bbox_conf={ppi_record.bbox_conf}, "
+            f"bbox_xyxy={ppi_record.bbox_xyxy}, "
+            f"bbox_xyxy_omni_deg={ppi_record.bbox_xyxy_omni_deg})"
         )
 
 def ppi_record_to_dict(ppi_record: PPIRecord) -> dict:
@@ -192,7 +238,9 @@ def ppi_record_to_dict(ppi_record: PPIRecord) -> dict:
         "detection_point_ppi": None if ppi_record.detection_point_ppi is None else ppi_record.detection_point_ppi.tolist(),
         "detection_point_omni_deg": None if ppi_record.detection_point_omni_deg is None else ppi_record.detection_point_omni_deg.tolist(),
         "detection_conf": ppi_record.detection_conf,
+        "bbox_conf": ppi_record.bbox_conf,
         "bbox_xyxy": None if ppi_record.bbox_xyxy is None else list(ppi_record.bbox_xyxy),
+        "bbox_xyxy_omni_deg": None if ppi_record.bbox_xyxy_omni_deg is None else list(ppi_record.bbox_xyxy_omni_deg),
     }
 
 def save_ppirecords_json(
