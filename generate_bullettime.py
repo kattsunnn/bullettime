@@ -25,7 +25,7 @@ class PPIRecord:
     detection_conf: float | None = None
     bbox_conf: float | None = None
     bbox_xyxy: tuple[float, float, float, float] | None = None
-    bbox_xyxy_omni_deg: tuple[float, float, float, float] | None = None
+    bbox_img: np.ndarray | None = None
 @dataclass
 class CropRecord:
     camera_id: int
@@ -118,15 +118,17 @@ def add_omni_point(ppis: list[PPI], ppi_records: list[PPIRecord]) -> list[PPIRec
                 dtype=float,
             )
         if ppi_record.bbox_xyxy is not None:
-            x1, y1, x2, y2 = ppi_record.bbox_xyxy
-            x1_deg, y1_deg = ppi.convert_ppi_point_to_src_angle_coor(x1, y1)
-            x2_deg, y2_deg = ppi.convert_ppi_point_to_src_angle_coor(x2, y2)
-            ppi_record.bbox_xyxy_omni_deg = (
-                float(x1_deg),
-                float(y1_deg),
-                float(x2_deg),
-                float(y2_deg),
-            )
+            # bbox_xyxy からクロップ画像を作成して bbox_img に保存
+            x1, y1, x2, y2 = map(int, ppi_record.bbox_xyxy)
+            ppi_img = ppi.get_ppi()
+            h, w = ppi_img.shape[:2]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+            
+            if x2 > x1 and y2 > y1:
+                ppi_record.bbox_img = ppi_img[y1:y2, x1:x2].copy()
+            else:
+                ppi_record.bbox_img = None
 
     return ppi_records
 
@@ -171,7 +173,7 @@ def distance_based_nms(ppi_records: list[PPIRecord], dist_th: float = 5.0) -> li
 
         p_max.bbox_conf = best_bbox_record.bbox_conf
         p_max.bbox_xyxy = best_bbox_record.bbox_xyxy
-        p_max.bbox_xyxy_omni_deg = best_bbox_record.bbox_xyxy_omni_deg
+        p_max.bbox_img = best_bbox_record.bbox_img
         
         selected_records.append(p_max)
 
@@ -179,31 +181,14 @@ def distance_based_nms(ppi_records: list[PPIRecord], dist_th: float = 5.0) -> li
 
 
 def convert_ppi_record_to_crop(camera_id: int, ppis: list[PPI], ppi_record: PPIRecord, save_path: str) -> CropRecord:
-    if ppi_record.ppi_id >= len(ppis) or ppi_record.bbox_xyxy_omni_deg is None:
-        print(f"[Debug] Skipping: ppi_id={ppi_record.ppi_id}, bbox_xyxy_omni_deg={getattr(ppi_record, 'bbox_xyxy_omni_deg', None)}")
+    if ppi_record.ppi_id >= len(ppis) or ppi_record.bbox_img is None:
         return None
         
     ppi_obj = ppis[ppi_record.ppi_id]
-    ppi_img = ppi_obj.get_ppi()
     u, v = ppi_obj.convert_ppi_point_to_src_img_coor(ppi_record.detection_point_ppi[0], ppi_record.detection_point_ppi[1])
     detection_point_omni_uv = np.array([u, v])
+    crop_img = ppi_record.bbox_img
     
-    # bbox_xyxy_omni_deg から xyxy を取得して ppi 座標に変換
-    x1_deg, y1_deg, x2_deg, y2_deg = ppi_record.bbox_xyxy_omni_deg
-    x1_ppi, y1_ppi = ppi_obj.convert_src_angle_coor_to_ppi_point(x1_deg, y1_deg)
-    x2_ppi, y2_ppi = ppi_obj.convert_src_angle_coor_to_ppi_point(x2_deg, y2_deg)
-    h, w = ppi_img.shape[:2]
-    x1, y1 = max(0, x1_ppi), max(0, y1_ppi)
-    x2, y2 = min(w, x2_ppi), min(h, y2_ppi)
-    # 画像の切り抜き
-    crop_img = ppi_img[y1:y2, x1:x2]
-    
-    print(f"[Debug] camera_id: {camera_id}, ppi_id: {ppi_record.ppi_id}")
-    print(f"        omni_deg: ({x1_deg:.2f}, {y1_deg:.2f}, {x2_deg:.2f}, {y2_deg:.2f})")
-    print(f"        ppi_point (raw float): ({x1_ppi:.2f}, {y1_ppi:.2f}, {x2_ppi:.2f}, {y2_ppi:.2f})")
-    print(f"        ppi_point (int cropped): ({x1}, {y1}, {x2}, {y2}), ppi_img_shape: (w={w}, h={h})")
-    print(f"        crop_img size: {crop_img.size if crop_img is not None else 0}, save_path: {save_path}")
-
     # 画像の保存
     if crop_img.size > 0:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -229,7 +214,7 @@ def print_ppirecords(ppi_records: list[PPIRecord]) -> None:
             f"detection_conf={ppi_record.detection_conf}, "
             f"bbox_conf={ppi_record.bbox_conf}, "
             f"bbox_xyxy={ppi_record.bbox_xyxy}, "
-            f"bbox_xyxy_omni_deg={ppi_record.bbox_xyxy_omni_deg})"
+            f"bbox_img_shape={None if ppi_record.bbox_img is None else ppi_record.bbox_img.shape})"
         )
 
 def ppi_record_to_dict(ppi_record: PPIRecord) -> dict:
@@ -240,7 +225,7 @@ def ppi_record_to_dict(ppi_record: PPIRecord) -> dict:
         "detection_conf": ppi_record.detection_conf,
         "bbox_conf": ppi_record.bbox_conf,
         "bbox_xyxy": None if ppi_record.bbox_xyxy is None else list(ppi_record.bbox_xyxy),
-        "bbox_xyxy_omni_deg": None if ppi_record.bbox_xyxy_omni_deg is None else list(ppi_record.bbox_xyxy_omni_deg),
+        "has_bbox_img": ppi_record.bbox_img is not None,
     }
 
 def save_ppirecords_json(
