@@ -2,23 +2,14 @@ from ultralytics import YOLO
 import numpy as np
 
 class PD_YOLO:
-    def __init__(self, model_path: str = 'yolo26x-pose.pt', input_size: int = 640, conf: float = 0.25):
+    def __init__(self, model_path: str = 'yolo26x-pose.pt'):
         self.model = YOLO(model_path)
-        self.input_size = input_size
-        self.conf = conf
         self.results = None
 
-    def detect_pose(self, imgs):
-        self.results = self.model(imgs, imgsz=self.input_size, conf=self.conf, verbose=False)
+    def detect_pose(self, imgs: list[np.ndarray], input_size: int = 640, conf: float = 0.25):
+        self.results = self.model(imgs, imgsz=input_size, conf=conf, verbose=False)
         return self.results
 
-    # def _get_detected_results(self):
-    #     if self.results is None:
-    #         return
-    #     for result in self.results:
-    #         if len(result.keypoints.data) > 0:
-    #             yield result
-                 
     # 指定したキーポイントインデックスの座標を収集 
     def get_landmark_points(self, keypoint_idx: int = 0) -> dict:
         target_points_dict = {} 
