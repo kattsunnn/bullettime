@@ -6,8 +6,8 @@ class PD_YOLO:
         self.model = YOLO(model_path)
         self.results = None
 
-    def detect_pose(self, imgs: list[np.ndarray], input_size: int = 640, conf: float = 0.25):
-        self.results = self.model(imgs, imgsz=input_size, conf=conf, verbose=False)
+    def detect_pose(self, imgs: list[np.ndarray], input_size: int = 640, pd_conf: float = 0.5):
+        self.results = self.model(imgs, imgsz=input_size, conf=pd_conf, verbose=False)
         return self.results
 
     # 指定したキーポイントインデックスの座標を収集 
@@ -80,8 +80,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     input_path = Path(args.input_path)
-    pose_detector = PD_YOLO(input_size=2000)
-    results = pose_detector.detect_pose(input_path)
+    pose_detector = PD_YOLO()
+    results = pose_detector.detect_pose(input_path, input_size=2000)
     target_points = pose_detector.get_landmark_points()
     plotted_imgs = pose_detector.plot_detected_poses()
     for i, img in enumerate(plotted_imgs):

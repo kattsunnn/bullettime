@@ -9,7 +9,8 @@ def create_ppirecords(
     ppis: list[PPI],
     detection_results, 
     gaze_idx: int = 0, 
-    length_idx: list[int] = [2, 6, 12, 14, 16]
+    length_idx: list[int] = [2, 6, 12, 14, 16],
+    ppi_conf: float = 0.25
 ) -> list[PPIRecord]:
     if not (0 <= gaze_idx <= 16):
         raise ValueError(f"gaze_idx must be between 0 and 16. Got: {gaze_idx}")
@@ -34,8 +35,18 @@ def create_ppirecords(
         h, w = ppi_img.shape[:2]
 
         for bbox_xyxy, detection_kps, box_conf in zip(boxes, keypoints, confs):
+            # bboxの信頼度チェック
+            if box_conf < ppi_conf:
+                continue
+
             # すべてのキーポイント（インデックス 0〜16 のすべて）が検出されているか確認
             if not np.all(detection_kps[:, 2] > 0):
+                continue
+
+            # gaze_idx と length_idx のキーポイントの信頼度チェック
+            target_indices = [gaze_idx] + list(length_idx)
+            target_kps_conf = detection_kps[target_indices, 2]
+            if not np.all(target_kps_conf >= ppi_conf):
                 continue
 
             # クロップ画像 (bbox_img) の生成と検証

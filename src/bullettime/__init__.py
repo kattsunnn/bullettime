@@ -14,6 +14,7 @@ from .io import (
     save_json,
     save_ppirecords_json,
     save_croprecords_json,
+    load_croprecords_json,
     save_person_cluster_json,
     save_reconstruction_results_json,
     load_extrinsics,

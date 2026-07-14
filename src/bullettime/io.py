@@ -81,4 +81,20 @@ def load_extrinsics(pose_path: Path) -> np.ndarray:
     extrinsics_array = np.array(extrinsics_list)
     print(f"Loaded extrinsics for {len(extrinsics_list)} camera")
     return extrinsics_array
+
+
+def load_croprecords_json(file_path: str) -> list[CropRecord]:
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    crop_records = []
+    for item in data:
+        rec = CropRecord(
+            camera_id=item["camera_id"],
+            crop_img_path=item["crop_img_path"],
+            gaze_point_omni_uv=np.array(item["gaze_point_omni_uv"], dtype=float),
+            length_points_omni_uv=np.array(item["length_points_omni_uv"], dtype=float)
+        )
+        crop_records.append(rec)
+    return crop_records
+
         
