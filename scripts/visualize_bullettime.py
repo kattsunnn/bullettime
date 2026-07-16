@@ -73,8 +73,8 @@ def plot_visualizations(pose_data, gaze_data=None, recon_data=None, output_path=
             # 3D注視点プロット
             if gaze_3d.shape == (3,):
                 ax.scatter(gaze_3d[0], gaze_3d[1], gaze_3d[2], s=60, color='magenta', marker='o', edgecolors='k', label=f'Gaze Point {key}' if key == '0' else "", zorder=7)
-                # 注視点の真上にクラスタ番号（キー）を描画（Z座標を少し上にオフセット）
-                ax.text(gaze_3d[0], gaze_3d[1], gaze_3d[2] + 0.12, f"C{key}", fontsize=9, color='magenta', fontweight='bold', ha='center', va='bottom', zorder=10)
+                # 注視点の近くにクラスタ番号（キー）を描画
+                ax.text(gaze_3d[0], gaze_3d[1], gaze_3d[2], f" C{key}", fontsize=9, color='magenta', fontweight='bold', zorder=10)
 
             # 長さ計測の3D点群 (折れ線)
             if length_pts.ndim == 2 and length_pts.shape[1] == 3:
@@ -120,6 +120,11 @@ def plot_visualizations(pose_data, gaze_data=None, recon_data=None, output_path=
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
     ax.set_title("Bullettime Reconstruction 3D Plot")
+
+    # 軸の目盛り数値を非表示にする（目盛り線やグリッドは残ります）
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    ax.set_zticklabels([])
     
     # 凡例の追加
     handles, labels = ax.get_legend_handles_labels()

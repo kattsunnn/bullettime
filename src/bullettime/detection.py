@@ -140,5 +140,6 @@ def convert_ppi_record_to_crop(camera_id: int, ppi: PPI, ppi_record: PPIRecord, 
         camera_id=camera_id,
         crop_img_path=save_path,
         gaze_point_omni_uv=gaze_point_omni_uv,
-        length_points_omni_uv=length_points_omni_uv
+        length_points_omni_uv=length_points_omni_uv,
+        gaze_point_omni_deg=ppi_record.gaze_point_omni_deg
     )

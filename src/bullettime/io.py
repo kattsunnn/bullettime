@@ -44,6 +44,7 @@ def save_croprecords_json(
             "crop_img_path": crop_record.crop_img_path,
             "gaze_point_omni_uv": crop_record.gaze_point_omni_uv.tolist(),
             "length_points_omni_uv": crop_record.length_points_omni_uv.tolist(),
+            "gaze_point_omni_deg": crop_record.gaze_point_omni_deg.tolist(),
         }
 
     save_data = [crop_record_to_dict(rec) for rec in crop_records]
@@ -92,9 +93,23 @@ def load_croprecords_json(file_path: str) -> list[CropRecord]:
             camera_id=item["camera_id"],
             crop_img_path=item["crop_img_path"],
             gaze_point_omni_uv=np.array(item["gaze_point_omni_uv"], dtype=float),
-            length_points_omni_uv=np.array(item["length_points_omni_uv"], dtype=float)
+            length_points_omni_uv=np.array(item["length_points_omni_uv"], dtype=float),
+            gaze_point_omni_deg=np.array(item["gaze_point_omni_deg"], dtype=float)
         )
         crop_records.append(rec)
     return crop_records
+
+
+def save_gaze_rays_json(save_file_path: str, gaze_rays: list[dict]) -> str:
+    """gaze_raysをJSON形式で保存する"""
+    def ray_to_dict(ray: dict) -> dict:
+        return {
+            "camera_id": ray["camera_id"],
+            "origin": ray["origin"].tolist() if isinstance(ray["origin"], np.ndarray) else ray["origin"],
+            "direction": ray["direction"].tolist() if isinstance(ray["direction"], np.ndarray) else ray["direction"]
+        }
+    
+    save_data = [ray_to_dict(ray) for ray in gaze_rays]
+    return save_json(save_file_path, save_data)
 
         

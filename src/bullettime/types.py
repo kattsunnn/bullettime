@@ -17,6 +17,7 @@ class CropRecord:
     crop_img_path: str
     gaze_point_omni_uv: np.ndarray 
     length_points_omni_uv: np.ndarray
+    gaze_point_omni_deg: np.ndarray
 
 
 @dataclass
