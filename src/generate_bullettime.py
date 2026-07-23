@@ -258,7 +258,7 @@ def generate_bullettime_from_croprecords(src_imgs: list[np.ndarray], output_path
 
 def generate_bullettime_by_intersection_estimation(
         src_imgs: list[np.ndarray], output_path: Path, extrinsics: Path, crop_records_path: Path, 
-        d_max: float = 100, R: float = 100, min_rays: int = 3, alpha: int = 2):
+        d_max: float = 0.5 , R: float = 0.5, min_rays: int = 3):
 
     crop_records = load_croprecords_json(str(crop_records_path))
     extrinsics_data = load_extrinsics(extrinsics)
@@ -274,7 +274,7 @@ def generate_bullettime_by_intersection_estimation(
     while len(current_rays) >= min_rays:
         print(f"\n=== Iteration {iteration}: Remaining rays = {len(current_rays)} ===")
         # 5. 疑似交点と対応する直線ペアのインデックスを計算
-        intersections, contrib_pairs = calculate_pseudo_intersections(current_rays, d_max, return_pairs=True, alpha=alpha)
+        intersections, contrib_pairs = calculate_pseudo_intersections(current_rays, d_max, return_pairs=True)
         print(f"Found {len(intersections)} pseudo-intersections in this iteration.")
         
         if len(intersections) == 0:
@@ -302,11 +302,6 @@ def generate_bullettime_by_intersection_estimation(
             "gaze_point_3d": best_point,
             "contributing_rays": contributing_rays
         })
-        
-        print(f"Cluster {iteration}: Gaze Point = {best_point}")
-        print(f"  Contributing rays: {len(contributing_rays)}")
-        for ray in contributing_rays:
-            print(f"    Cam {ray['camera_id']} : origin = {ray['origin']}")
 
         # 6. 可視化
         visualize_gaze_rays_and_intersections(current_rays, intersections, best_point=best_point)

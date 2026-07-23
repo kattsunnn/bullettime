@@ -40,10 +40,7 @@ def calculate_gaze_rays(crop_records: list[CropRecord], extrinsics_data: np.ndar
     return gaze_rays
 
 
-def calculate_pseudo_intersections(gaze_rays: list[dict], d_max: float = 100.0, alpha: int = 2, return_pairs: bool = False) -> list[np.ndarray] | tuple[list[np.ndarray], list[tuple[int, int]]]:
-    """各直線に対して最も距離の近い別の直線を1つ選び（ペアを組む）、
-    そのペアの最小距離が d_max 以下の疑似交点 (共通垂線の中点) を計算して返す。
-    return_pairs=True の場合は、(交点リスト, 直線ペアインデックスリスト) のタプルを返す。"""
+def calculate_pseudo_intersections(gaze_rays: list[dict], d_max: float, return_pairs: bool = False) -> list[np.ndarray] | tuple[list[np.ndarray], list[tuple[int, int]]]:
     intersections = []
     contrib_pairs = []
     n = len(gaze_rays)
@@ -52,60 +49,27 @@ def calculate_pseudo_intersections(gaze_rays: list[dict], d_max: float = 100.0, 
             return intersections, contrib_pairs
         return intersections
 
-    # 1. 距離行列の初期化 (n x n, 初期値は無限大)
-    d_matrix = np.full((n, n), np.inf)
-
-    # 2. 全てのペア (i, j) の距離を計算して格納
+    # 全てのペア (i, j) について距離を計算し、d_max 以下なら疑似交点を算出
     for i in range(n):
         for j in range(i + 1, n):
             if gaze_rays[i]["camera_id"] == gaze_rays[j]["camera_id"]:
-                # 同じカメラのペアは距離計算をスキップ (infのまま)
+                # 同じカメラのペアはスキップ
                 continue
-
             p_i = gaze_rays[i]["origin"]
             v_i = gaze_rays[i]["direction"]
             p_j = gaze_rays[j]["origin"]
             v_j = gaze_rays[j]["direction"]
-            
             # 法線ベクトル n_ij = v_i x v_j
             n_ij = np.cross(v_i, v_j)
             n_norm = np.linalg.norm(n_ij)
-            
             if n_norm < 1e-8:
-                # 直線同士が平行な場合は距離を計算せず inf のままとする
+                # 直線同士が平行な場合はスキップ
                 continue
-                
             # 最小距離 d_ij
             d_ij = np.abs(np.dot(p_i - p_j, n_ij)) / n_norm
-            d_matrix[i, j] = d_ij
-            d_matrix[j, i] = d_ij
-
-    # 3. 距離の昇順にソートし、上位 (n * alpha) 個のペアを抽出する
-    pairs_with_dist = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = d_matrix[i, j]
-            if dist != np.inf:
-                pairs_with_dist.append((i, j, dist))
-                
-    # 距離の昇順でソート
-    pairs_with_dist.sort(key=lambda x: x[2])
-    
-    # 上位 (n * alpha) 個のみを選択
-    limit = n * alpha
-    selected_pairs = pairs_with_dist[:limit]
-    
-    unique_pairs = set((p[0], p[1]) for p in selected_pairs)
-
-
-    # 4. 選択されたユニークなペアについて、距離が d_max 以下か評価し疑似交点を算出
-    for i, j in unique_pairs:
-        d_ij = d_matrix[i, j]
-        if d_ij <= d_max:
-            p_i = gaze_rays[i]["origin"]
-            v_i = gaze_rays[i]["direction"]
-            p_j = gaze_rays[j]["origin"]
-            v_j = gaze_rays[j]["direction"]
+            
+            if d_ij > d_max:
+                continue
 
             v_i_dot_v_j = np.dot(v_i, v_j)
             v_i_dot_v_i = np.dot(v_i, v_i)
@@ -132,16 +96,13 @@ def calculate_pseudo_intersections(gaze_rays: list[dict], d_max: float = 100.0, 
             c_ij = (q_i + q_j) / 2.0
             intersections.append(c_ij)
             contrib_pairs.append((i, j))
-            
-            print(f"Selected Pair: Intersection between Cam {gaze_rays[i]['camera_id']} and Cam {gaze_rays[j]['camera_id']}:")
-            print(f"  pseudo_intersection = {c_ij}, distance = {d_ij:.4f}")
 
     if return_pairs:
         return intersections, contrib_pairs
     return intersections
 
 
-def visualize_gaze_rays_and_intersections(gaze_rays: list[dict], intersections: list[np.ndarray], ray_length: float = 5.0, best_point: np.ndarray = None):
+def visualize_gaze_rays_and_intersections(gaze_rays: list[dict], intersections: list[np.ndarray], ray_length: float = 10.0, best_point: np.ndarray = None):
     """gaze_rays (直線) と疑似交点 (点) を 3D 空間で可視化する"""
     try:
         import matplotlib.pyplot as plt
