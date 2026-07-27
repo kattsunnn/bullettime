@@ -6,7 +6,7 @@ class PPIRecord:
     ppi_id: int
     gaze_point_ppi: np.ndarray 
     gaze_conf: float
-    length_points_ppi: np.ndarray 
+    keypoints_ppi: np.ndarray 
     bbox_conf: float
     gaze_point_omni_deg: np.ndarray
     bbox_img: np.ndarray
@@ -16,7 +16,7 @@ class CropRecord:
     camera_id: int
     crop_img_path: str
     gaze_point_omni_uv: np.ndarray 
-    length_points_omni_uv: np.ndarray
+    keypoints_omni_uv: np.ndarray
     gaze_point_omni_deg: np.ndarray
 
 
@@ -27,3 +27,11 @@ class ReconstructionRecord:
     total_length: float
     cameras: list[int]
     paths: list[str]
+
+
+@dataclass
+class GazeRay:
+    camera_id: int
+    origin: np.ndarray
+    direction: np.ndarray
+    path: str

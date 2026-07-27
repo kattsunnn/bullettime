@@ -43,12 +43,13 @@ def validate_and_filter_clusters(
             cleaned_cluster[label] = valid_paths
     return cleaned_cluster
 
-def reconstruct_cluster_3d(
+def create_reconstruction_record(
     paths: list[str],
     all_crop_records: list[CropRecord],
     extrinsics: np.ndarray,
     src_w: int,
     src_h: int,
+    length_idx: list[int] = [9, 7, 5, 6, 8, 10],
 ) -> ReconstructionRecord:
     """1つの人物クラスタから対応点（注視点および長さ測定点）の3次元座標を復元する"""
     crop_record_map = {record.crop_img_path: record for record in all_crop_records}
@@ -59,9 +60,9 @@ def reconstruct_cluster_3d(
         record = crop_record_map[path]
         camera_id = record.camera_id
         extrinsics_list.append(extrinsics[camera_id])
-        # gaze_point_omni_uv (2,) と length_points_omni_uv (N, 2) を結合して (1+N, 2) の配列にする
+        # gaze_point_omni_uv (2,) と keypoints_omni_uv (N, 2) から対象の点を結合して (1+N, 2) の配列にする
         gaze_pt = record.gaze_point_omni_uv
-        length_pts = record.length_points_omni_uv
+        length_pts = record.keypoints_omni_uv[length_idx]
         combined_pts = np.vstack([gaze_pt[np.newaxis, :], length_pts])
         
         corr_points.append(combined_pts)

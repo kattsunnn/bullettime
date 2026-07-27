@@ -25,7 +25,7 @@ def save_ppirecords_json(
             "gaze_point_ppi": ppi_record.gaze_point_ppi.tolist(),
             "gaze_point_omni_deg": ppi_record.gaze_point_omni_deg.tolist(),
             "gaze_conf": ppi_record.gaze_conf,
-            "length_points_ppi": ppi_record.length_points_ppi.tolist(),
+            "keypoints_ppi": ppi_record.keypoints_ppi.tolist(),
             "bbox_conf": ppi_record.bbox_conf,
             "has_bbox_img": True,
         }
@@ -43,7 +43,7 @@ def save_croprecords_json(
             "camera_id": crop_record.camera_id,
             "crop_img_path": crop_record.crop_img_path,
             "gaze_point_omni_uv": crop_record.gaze_point_omni_uv.tolist(),
-            "length_points_omni_uv": crop_record.length_points_omni_uv.tolist(),
+            "keypoints_omni_uv": crop_record.keypoints_omni_uv.tolist(),
             "gaze_point_omni_deg": crop_record.gaze_point_omni_deg.tolist(),
         }
 
@@ -93,7 +93,7 @@ def load_croprecords_json(file_path: str) -> list[CropRecord]:
             camera_id=item["camera_id"],
             crop_img_path=item["crop_img_path"],
             gaze_point_omni_uv=np.array(item["gaze_point_omni_uv"], dtype=float),
-            length_points_omni_uv=np.array(item["length_points_omni_uv"], dtype=float),
+            keypoints_omni_uv=np.array(item["keypoints_omni_uv"], dtype=float),
             gaze_point_omni_deg=np.array(item["gaze_point_omni_deg"], dtype=float)
         )
         crop_records.append(rec)
@@ -111,5 +111,22 @@ def save_gaze_rays_json(save_file_path: str, gaze_rays: list[dict]) -> str:
     
     save_data = [ray_to_dict(ray) for ray in gaze_rays]
     return save_json(save_file_path, save_data)
+
+def save_geometric_reid_process_json(save_file_path: str, process_data: list[dict]) -> str:
+    """geometric_reidの処理プロセスデータをJSON形式で保存します"""
+    def sanitize(item):
+        if isinstance(item, np.ndarray):
+            return item.tolist()
+        if isinstance(item, list):
+            return [sanitize(x) for x in item]
+        if isinstance(item, dict):
+            return {k: sanitize(v) for k, v in item.items()}
+        if isinstance(item, tuple):
+            return [sanitize(x) for x in item]  # JSONにはリストで出力
+        return item
+    
+    sanitized_data = sanitize(process_data)
+    return save_json(save_file_path, sanitized_data)
+
 
         

@@ -28,20 +28,22 @@ from bullettime import (
     load_croprecords_json,
     save_person_cluster_json,
     save_reconstruction_results_json,
+    save_geometric_reid_process_json,
     load_extrinsics,
     validate_and_filter_clusters,
-    reconstruct_cluster_3d,
+    create_reconstruction_record,
     cluster_gaze_points,
     save_gaze_rays_json,
     calculate_gaze_rays,
-    calculate_pseudo_intersections,
-    visualize_gaze_rays_and_intersections,
-    find_highest_density_point,
+    filter_pairs_by_camera_id,
+    remove_records_by_paths,
+    find_rays_within_distance,
+    visualize_geometric_reid,
 )
 
 def create_crop_records(camera_id: int, src_img, output_path,
                         *, fov_w=60, fov_h=60, overlap=0.25, range_w=90 , range_h=60,
-                        input_size=1504, pd_conf=0.5, ppi_conf=0.25, gaze_idx=0, length_idx=[2, 6, 12, 14, 16],
+                        input_size=1504, pd_conf=0.5, ppi_conf=0.25, gaze_idx=0,
                         dist_th=5.0) -> list[CropRecord]:
     file_name_pattern = f"camera_{camera_id:02d}"                   
     # 正面方向の透視投影画像を生成
@@ -54,7 +56,7 @@ def create_crop_records(camera_id: int, src_img, output_path,
     plotted_ppis = pose_detector.plot_detected_poses()
     iu.save_imgs(plotted_ppis, f"{output_path}/01_plotted_ppi", f"{file_name_pattern}_{{}}")
     # 注視点の抽出（クロップ・全方位角度変換まで実行）
-    ppi_records = create_ppirecords(ppis, detection_results, gaze_idx=gaze_idx, length_idx=length_idx, ppi_conf=ppi_conf)
+    ppi_records = create_ppirecords(ppis, detection_results, gaze_idx=gaze_idx, ppi_conf=ppi_conf)
     if not ppi_records: return []
     ppi_records_before_nms = copy.deepcopy(ppi_records) # コピーが残らないから必要？
     ppi_records_filterd_by_nms = distance_based_nms(ppi_records, dist_th=dist_th)
@@ -78,7 +80,7 @@ def create_crop_records(camera_id: int, src_img, output_path,
 
 def create_all_crop_records(src_imgs: list[np.ndarray], output_path: Path,
                           fov_w=60.0, fov_h=60.0, ppi_overlap=0.25, ppi_range_w=90, ppi_range_h=60,
-                          pd_input_size=1504, pd_conf=0.5, ppi_conf=0.25, gaze_idx=0, length_idx=[2, 6, 12, 14, 16],
+                          pd_input_size=1504, pd_conf=0.5, ppi_conf=0.25, gaze_idx=0,
                           nms_dist_th=5.0) -> list[CropRecord]:
     # 局所画像群生成
     all_crop_records: list[CropRecord] = []
@@ -96,7 +98,6 @@ def create_all_crop_records(src_imgs: list[np.ndarray], output_path: Path,
             pd_conf=pd_conf,
             ppi_conf=ppi_conf,
             gaze_idx=gaze_idx,
-            length_idx=length_idx,
             dist_th=nms_dist_th,
         )
         all_crop_records.extend(crop_records)
@@ -110,7 +111,8 @@ def create_all_crop_records(src_imgs: list[np.ndarray], output_path: Path,
 
 def create_bullettime_from_croprecords(src_imgs: list[np.ndarray], output_path: Path, extrinsics: np.ndarray,
                                             all_crop_records: list[CropRecord],
-                                            reid_eps=0.4, reid_min_sample=3, k=5, fov_w=60.0, fov_h=60.0, scale_dist=2.0) -> list[CropRecord]:
+                                            reid_eps=0.4, reid_min_sample=3, k=5, fov_w=60.0, fov_h=60.0, scale_dist=2.0,
+                                            length_idx: list[int] = [9, 7, 5, 6, 8, 10]) -> list[CropRecord]:
     # Person ReId
     cropped_img_paths = [record.crop_img_path for record in all_crop_records]
     if len(cropped_img_paths) < 4:
@@ -125,12 +127,13 @@ def create_bullettime_from_croprecords(src_imgs: list[np.ndarray], output_path: 
     src_h, src_w = src_imgs[0].shape[:2]
         
     for label, paths in person_cluster.items():
-        reconstruction_results[str(label)] = reconstruct_cluster_3d(
+        reconstruction_results[str(label)] = create_reconstruction_record(
             paths=paths,
             all_crop_records=all_crop_records,
             extrinsics=extrinsics,
             src_w=src_w,
-            src_h=src_h
+            src_h=src_h,
+            length_idx=length_idx
         )
     save_reconstruction_results_json(f"{output_path}/02_data/reconstruction_3d.json", reconstruction_results)   
     # gaze_point_3d のクラスタリングを実行し、代表値を保存
@@ -162,7 +165,7 @@ def create_bullettime_from_croprecords(src_imgs: list[np.ndarray], output_path: 
 def generate_bullettime(src_imgs: list[np.ndarray], output_path: Path, extrinsics: np.ndarray,
                         reid_eps=0.4, reid_min_sample=3, k=5, fov_w=60.0, fov_h=60.0, scale_dist=2.0,
                         ppi_overlap=0.25, ppi_range_w=90, ppi_range_h=60, pd_input_size=1504, pd_conf=0.5,
-                        ppi_conf=0.25, gaze_idx=0, length_idx=[2, 6, 12, 14, 16], nms_dist_th=5.0) -> list[CropRecord]:
+                        ppi_conf=0.25, gaze_idx=0, length_idx=[9, 7, 5, 6, 8, 10], nms_dist_th=5.0) -> list[CropRecord]:
     # バリデーション
     if len(src_imgs) != len(extrinsics):
         raise ValueError(
@@ -201,7 +204,6 @@ def generate_bullettime(src_imgs: list[np.ndarray], output_path: Path, extrinsic
         pd_conf=pd_conf,
         ppi_conf=ppi_conf,
         gaze_idx=gaze_idx,
-        length_idx=length_idx,
         nms_dist_th=nms_dist_th
     )
 
@@ -215,13 +217,15 @@ def generate_bullettime(src_imgs: list[np.ndarray], output_path: Path, extrinsic
         k=k,
         fov_w=fov_w,
         fov_h=fov_h,
-        scale_dist=scale_dist
+        scale_dist=scale_dist,
+        length_idx=length_idx
     )
 
 
 def generate_bullettime_from_croprecords(src_imgs: list[np.ndarray], output_path: Path, extrinsics: np.ndarray,
                                          crop_records_path: Path,
-                                         reid_eps=0.4, reid_min_sample=3, k=5, fov_w=60.0, fov_h=60.0, scale_dist=2.0) -> list[CropRecord]:
+                                         reid_eps=0.4, reid_min_sample=3, k=5, fov_w=60.0, fov_h=60.0, scale_dist=2.0,
+                                         length_idx: list[int] = [9, 7, 5, 6, 8, 10]) -> list[CropRecord]:
     # バリデーション
     if len(src_imgs) != len(extrinsics):
         raise ValueError(
@@ -252,83 +256,89 @@ def generate_bullettime_from_croprecords(src_imgs: list[np.ndarray], output_path
         k=k,
         fov_w=fov_w,
         fov_h=fov_h,
-        scale_dist=scale_dist
+        scale_dist=scale_dist,
+        length_idx=length_idx
     )
 
+def generate_bullettime_by_geometric_person_reid(
+        src_imgs: list[np.ndarray], output_path: Path, extrinsics_path: Path, crop_records_path: Path,
+        min_rays: int=3, length_idx: list[int] = [9, 7, 5, 6, 8, 10] , sim_th: float=0.75, sim_th_factor: float=0.5):
+    # クロップレコード，外部パラメータ読み込み
+    all_crop_records = load_croprecords_json(str(crop_records_path))
+    crop_records = list(all_crop_records)
+    extrinsics_data = load_extrinsics(extrinsics_path)
+    src_h, src_w = src_imgs[0].shape[:2]
+    gaze_points_3d = []
+    geometric_reid_process = []
 
-def generate_bullettime_by_intersection_estimation(
-        src_imgs: list[np.ndarray], output_path: Path, extrinsics: Path, crop_records_path: Path, 
-        d_max: float = 0.5 , R: float = 0.5, min_rays: int = 3):
-
-    crop_records = load_croprecords_json(str(crop_records_path))
-    extrinsics_data = load_extrinsics(extrinsics)
-    # 3. 3D視線直線のパラメータを計算
-    gaze_rays = calculate_gaze_rays(crop_records, extrinsics_data)
-    # 4. gaze_raysを保存
-    save_gaze_rays_json(f"{output_path}/02_data/gaze_rays.json", gaze_rays)
-
-    current_rays = list(gaze_rays)
-    clusters = []
-    iteration = 0
-
-    while len(current_rays) >= min_rays:
-        print(f"\n=== Iteration {iteration}: Remaining rays = {len(current_rays)} ===")
-        # 5. 疑似交点と対応する直線ペアのインデックスを計算
-        intersections, contrib_pairs = calculate_pseudo_intersections(current_rays, d_max, return_pairs=True)
-        print(f"Found {len(intersections)} pseudo-intersections in this iteration.")
-        
-        if len(intersections) == 0:
-            print("No more pseudo-intersections found. Ending loop.")
+    while len(crop_records) >= min_rays:
+        # 最も類似するペア特定
+        cropped_img_paths = [record.crop_img_path for record in crop_records]
+        person_pairs = OSNet.find_top_n_similar_pairs(cropped_img_paths, top_n=-1, similarity_threshold=sim_th)
+        if not person_pairs:
             break
-
-        # 5.5. 局所密度が最大となる点を特定
-        best_point, neighbor_indices = find_highest_density_point(intersections, R)
-        if best_point is None:
-            print("No valid highest density point found. Ending loop.")
+        valid_pairs = filter_pairs_by_camera_id(person_pairs, crop_records)
+        if not valid_pairs:
             break
-
-        # 5.6. 最大密度点の近傍点を構成する直線群を抽出
-        contributing_ray_indices = set()
-        for idx in neighbor_indices:
-            i, j = contrib_pairs[idx]
-            contributing_ray_indices.add(i)
-            contributing_ray_indices.add(j)
+        most_similar_pair = max(valid_pairs, key=lambda x: x[2])
+        most_similar_pair_path = [most_similar_pair[0], most_similar_pair[1]]
+        # 3次元復元
+        reconstruct_record = create_reconstruction_record(most_similar_pair_path, all_crop_records, extrinsics_data, src_w, src_h, length_idx) 
+        ref_point = reconstruct_record.gaze_point_3d 
+        ref_point_camera_ids = reconstruct_record.cameras
+        dist_th = reconstruct_record.total_length * sim_th_factor
+        gaze_rays = calculate_gaze_rays(crop_records, extrinsics_data)
+        # 復元した3次元注視点との最小距離が閾値以下となる直線を探索
+        close_rays = find_rays_within_distance(ref_point, ref_point_camera_ids, dist_th, extrinsics_data, gaze_rays)
+        # person_raysのパスをリスト化して結合
+        close_rays_path = [ray.path for ray in close_rays]
+        person_paths = most_similar_pair_path + close_rays_path
+        # 結合したパスで3次元復元を再度適用
+        reconstruct_record = create_reconstruction_record(person_paths, all_crop_records, extrinsics_data, src_w, src_h, length_idx)
+        gaze_points_3d.append(reconstruct_record.gaze_point_3d)
         
-        # 元の直線リストの順序を維持して抽出 (重複排除済み)
-        contributing_rays = [current_rays[idx] for idx in sorted(contributing_ray_indices)]
+        # 可視化
+        most_similar_records = [r for r in all_crop_records if r.crop_img_path in most_similar_pair_path]
+        most_similar_rays = calculate_gaze_rays(most_similar_records, extrinsics_data)
+        visualize_geometric_reid(
+            most_similar_rays=most_similar_rays,
+            close_rays=close_rays,
+            ref_point=ref_point,
+            final_gaze_point=reconstruct_record.gaze_point_3d
+        )
         
-        # クラスタとして記録
-        clusters.append({
-            "gaze_point_3d": best_point,
-            "contributing_rays": contributing_rays
-        })
+        # ログ保存 
+        iter_data = {
+            "most_similar_pair": most_similar_pair,
+            "ref_point": ref_point,
+            "dist_th": dist_th,
+            "close_ray_path": close_rays_path,
+            "gaze_3d_point": reconstruct_record.gaze_point_3d
+        }
+        geometric_reid_process.append(iter_data)
+        save_geometric_reid_process_json(f"{output_path}/02_data/geometric_reid_process.json", geometric_reid_process)
 
-        # 6. 可視化
-        visualize_gaze_rays_and_intersections(current_rays, intersections, best_point=best_point)
-        visualize_gaze_rays_and_intersections(contributing_rays, intersections, best_point=best_point)
-
-        # 7. 寄与した直線を残りの直線群から除外する
-        contrib_ids = {id(r) for r in contributing_rays}
-        current_rays = [r for r in current_rays if id(r) not in contrib_ids]
-        
-        iteration += 1
-
-    print(f"\nLoop finished. Identified {len(clusters)} clusters total.")
-    # TODO: 今後、generate_bullettime_from_croprecords とは異なる手法での bullettime 生成ロジックをここに実装します。
+        # 使用済みレコード削除
+        crop_records = remove_records_by_paths(crop_records, person_paths)
     
-    return crop_records
+    return gaze_points_3d
 
 def main():
     parser = argparse.ArgumentParser(description="全方位画像からバレットタイム映像を生成する")
     parser.add_argument("-i", "--input", required=True, help="入力画像のパス")
     parser.add_argument("-o", "--output", required=True, help="出力先ディレクトリ")
-    parser.add_argument("-p", "--pose", required=True, help="カメラ姿勢のJSONファイルのパス (images_aggregated_pose.json)")
+    parser.add_argument("-p", "--pose", required=False, help="カメラ姿勢のJSONファイルのパス (images_aggregated_pose.json)")
     parser.add_argument("-c", "--crop_records", required=False, help="CropレコードのJSONファイルのパス")
     parser.add_argument(
         "-m", "--mode", 
-        choices=["default", "from_croprecords", "by_intersection_estimation"], 
-        default="default",
-        help="実行モードを選択 (default: 通常生成, from_croprecords: 既存のCropレコードを使用, by_intersection_estimation: 別手法)"
+        choices=[
+            "generate_bullettime", 
+            "generate_bullettime_from_croprecords", 
+            "generate_bullettime_by_geometric_person_reid",
+            "create_all_crop_records"
+        ], 
+        default="generate_bullettime",
+        help="実行モードを選択 (generate_bullettime: 通常生成, generate_bullettime_from_croprecords: 既存のCropレコードを使用, generate_bullettime_by_geometric_person_reid: 幾何学的ReID手法, create_all_crop_records: クロップ画像生成のみ)"
     )
     args = parser.parse_args()
 
@@ -336,21 +346,27 @@ def main():
     output_path = Path(args.output)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    extrinsics_path = Path(args.pose)
+    extrinsics_path = Path(args.pose) if args.pose else None
     crop_records_path = Path(args.crop_records) if args.crop_records else None
 
-    if args.mode == "default":
+    if args.mode in ["generate_bullettime", "generate_bullettime_from_croprecords", "generate_bullettime_by_geometric_person_reid"]:
+        if extrinsics_path is None:
+            parser.error(f"-p/--pose is required for '{args.mode}' mode.")
+
+    if args.mode == "generate_bullettime":
         extrinsics = load_extrinsics(extrinsics_path)
         all_crop_records = generate_bullettime(src_imgs, output_path, extrinsics)
-    elif args.mode == "from_croprecords":
+    elif args.mode == "generate_bullettime_from_croprecords":
         if crop_records_path is None:
-            parser.error("--crop_records (-c) is required for 'from_croprecords' mode.")
+            parser.error("--crop_records (-c) is required for 'generate_bullettime_from_croprecords' mode.")
         extrinsics = load_extrinsics(extrinsics_path)
         all_crop_records = generate_bullettime_from_croprecords(src_imgs, output_path, extrinsics, crop_records_path)
-    elif args.mode == "by_intersection_estimation":
+    elif args.mode == "generate_bullettime_by_geometric_person_reid":
         if crop_records_path is None:
-            parser.error("--crop_records (-c) is required for 'by_intersection_estimation' mode.")
-        all_crop_records = generate_bullettime_by_intersection_estimation(src_imgs, output_path, extrinsics_path, crop_records_path)
+            parser.error("--crop_records (-c) is required for 'generate_bullettime_by_geometric_person_reid' mode.")
+        all_crop_records = generate_bullettime_by_geometric_person_reid(src_imgs, output_path, extrinsics_path, crop_records_path)
+    elif args.mode == "create_all_crop_records":
+        all_crop_records = create_all_crop_records(src_imgs, output_path)
     
 if __name__ == "__main__":
     main()

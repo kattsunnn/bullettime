@@ -9,14 +9,10 @@ def create_ppirecords(
     ppis: list[PPI],
     detection_results, 
     gaze_idx: int = 0, 
-    length_idx: list[int] = [2, 6, 12, 14, 16],
     ppi_conf: float = 0.25
 ) -> list[PPIRecord]:
     if not (0 <= gaze_idx <= 16):
         raise ValueError(f"gaze_idx must be between 0 and 16. Got: {gaze_idx}")
-    for idx in length_idx:
-        if not (0 <= idx <= 16):
-            raise ValueError(f"length_idx items must be between 0 and 16. Got invalid index: {idx}")
 
     ppi_records: list[PPIRecord] = []
 
@@ -43,10 +39,8 @@ def create_ppirecords(
             if not np.all(detection_kps[:, 2] > 0):
                 continue
 
-            # gaze_idx と length_idx のキーポイントの信頼度チェック
-            target_indices = [gaze_idx] + list(length_idx)
-            target_kps_conf = detection_kps[target_indices, 2]
-            if not np.all(target_kps_conf >= ppi_conf):
+            # gaze_idx のキーポイントの信頼度チェック
+            if detection_kps[gaze_idx, 2] < ppi_conf:
                 continue
 
             # クロップ画像 (bbox_img) の生成と検証
@@ -59,7 +53,7 @@ def create_ppirecords(
 
             gaze_point = detection_kps[gaze_idx]
             gaze_point_ppi = np.array(gaze_point[:2], dtype=float)
-            length_points_ppi = np.array([detection_kps[idx][:2] for idx in length_idx], dtype=float)
+            keypoints_ppi = np.array(detection_kps[:, :2], dtype=float)
 
             # gaze_point の全方位角度変換
             gaze_point_omni_deg = np.array(
@@ -75,7 +69,7 @@ def create_ppirecords(
                     ppi_id=ppi_id,
                     gaze_point_ppi=gaze_point_ppi,
                     gaze_conf=float(gaze_point[2]),
-                    length_points_ppi=length_points_ppi,
+                    keypoints_ppi=keypoints_ppi,
                     bbox_conf=float(box_conf),
                     bbox_img=bbox_img,
                     gaze_point_omni_deg=gaze_point_omni_deg,
@@ -125,12 +119,12 @@ def convert_ppi_record_to_crop(camera_id: int, ppi: PPI, ppi_record: PPIRecord, 
     # 注視点のUV座標への変換
     u, v = ppi.convert_ppi_point_to_src_img_coor(ppi_record.gaze_point_ppi[0], ppi_record.gaze_point_ppi[1])
     gaze_point_omni_uv = np.array([u, v])
-    # 身長（長さ）計測用のUV座標への変換
+    # キーポイントのUV座標への変換
     uv_list = []
-    for pt in ppi_record.length_points_ppi:
+    for pt in ppi_record.keypoints_ppi:
         u_pt, v_pt = ppi.convert_ppi_point_to_src_img_coor(pt[0], pt[1])
         uv_list.append([u_pt, v_pt])
-    length_points_omni_uv = np.array(uv_list, dtype=float)
+    keypoints_omni_uv = np.array(uv_list, dtype=float)
 
     # 画像の保存
     crop_img = ppi_record.bbox_img
@@ -140,6 +134,6 @@ def convert_ppi_record_to_crop(camera_id: int, ppi: PPI, ppi_record: PPIRecord, 
         camera_id=camera_id,
         crop_img_path=save_path,
         gaze_point_omni_uv=gaze_point_omni_uv,
-        length_points_omni_uv=length_points_omni_uv,
+        keypoints_omni_uv=keypoints_omni_uv,
         gaze_point_omni_deg=ppi_record.gaze_point_omni_deg
     )

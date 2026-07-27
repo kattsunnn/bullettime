@@ -1,4 +1,4 @@
-from .types import PPIRecord, CropRecord, ReconstructionRecord
+from .types import PPIRecord, CropRecord, ReconstructionRecord, GazeRay
 from .ppi import (
     get_or_create_ppi_map,
     generate_front_ppis,
@@ -19,17 +19,19 @@ from .io import (
     save_reconstruction_results_json,
     load_extrinsics,
     save_gaze_rays_json,
+    save_geometric_reid_process_json,
 )
 from .pd_yolo_pose import PD_YOLO
 from .reconstruction import (
     validate_and_filter_clusters,
-    reconstruct_cluster_3d,
+    create_reconstruction_record,
     cluster_gaze_points,
 )
-from .intersection_estimation import (
+from .geometric_person_reid import (
+    filter_pairs_by_camera_id,
+    remove_records_by_paths,
     calculate_gaze_rays,
-    calculate_pseudo_intersections,
-    visualize_gaze_rays_and_intersections,
-    find_highest_density_point,
+    find_rays_within_distance,
+    visualize_geometric_reid,
 )
 

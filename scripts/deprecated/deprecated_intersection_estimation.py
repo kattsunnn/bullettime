@@ -186,3 +186,66 @@ def find_highest_density_point(
     best_neighborhood = neighborhoods[best_idx]
 
     return best_point, best_neighborhood
+
+
+# def generate_bullettime_by_intersection_estimation(
+#         src_imgs: list[np.ndarray], output_path: Path, extrinsics: Path, crop_records_path: Path, 
+#         d_max: float = 0.5 , R: float = 0.5, min_rays: int = 3):
+
+#     crop_records = load_croprecords_json(str(crop_records_path))
+#     extrinsics_data = load_extrinsics(extrinsics)
+#     # 3. 3D視線直線のパラメータを計算
+#     gaze_rays = calculate_gaze_rays(crop_records, extrinsics_data)
+#     # 4. gaze_raysを保存
+#     save_gaze_rays_json(f"{output_path}/02_data/gaze_rays.json", gaze_rays)
+
+#     current_rays = list(gaze_rays)
+#     clusters = []
+#     iteration = 0
+
+#     while len(current_rays) >= min_rays:
+#         print(f"\n=== Iteration {iteration}: Remaining rays = {len(current_rays)} ===")
+#         # 5. 疑似交点と対応する直線ペアのインデックスを計算
+#         intersections, contrib_pairs = calculate_pseudo_intersections(current_rays, d_max, return_pairs=True)
+#         print(f"Found {len(intersections)} pseudo-intersections in this iteration.")
+        
+#         if len(intersections) == 0:
+#             print("No more pseudo-intersections found. Ending loop.")
+#             break
+
+#         # 5.5. 局所密度が最大となる点を特定
+#         best_point, neighbor_indices = find_highest_density_point(intersections, R)
+#         if best_point is None:
+#             print("No valid highest density point found. Ending loop.")
+#             break
+
+#         # 5.6. 最大密度点の近傍点を構成する直線群を抽出
+#         contributing_ray_indices = set()
+#         for idx in neighbor_indices:
+#             i, j = contrib_pairs[idx]
+#             contributing_ray_indices.add(i)
+#             contributing_ray_indices.add(j)
+        
+#         # 元の直線リストの順序を維持して抽出 (重複排除済み)
+#         contributing_rays = [current_rays[idx] for idx in sorted(contributing_ray_indices)]
+        
+#         # クラスタとして記録
+#         clusters.append({
+#             "gaze_point_3d": best_point,
+#             "contributing_rays": contributing_rays
+#         })
+
+#         # 6. 可視化
+#         visualize_gaze_rays_and_intersections(current_rays, intersections, best_point=best_point)
+#         visualize_gaze_rays_and_intersections(contributing_rays, intersections, best_point=best_point)
+
+#         # 7. 寄与した直線を残りの直線群から除外する
+#         contrib_ids = {id(r) for r in contributing_rays}
+#         current_rays = [r for r in current_rays if id(r) not in contrib_ids]
+        
+#         iteration += 1
+
+#     print(f"\nLoop finished. Identified {len(clusters)} clusters total.")
+#     # TODO: 今後、generate_bullettime_from_croprecords とは異なる手法での bullettime 生成ロジックをここに実装します。
+    
+#     return crop_records
