@@ -61,3 +61,26 @@ def generate_ppi_from_world_point(world_point: np.ndarray, extrinsic: np.ndarray
     generator.generate_map(fov_w, fov_h, eye_w, eye_h, 0, scale)
     ppi = generator.generate_img(src_img)
     return ppi
+
+def generate_bullettime_images(
+    world_point: np.ndarray,
+    extrinsics: list[np.ndarray] | np.ndarray,
+    src_imgs: list[np.ndarray],
+    fov_w: float,
+    fov_h: float,
+    scale_dist: float
+) -> list[np.ndarray]:
+    """1つの3次元点に対して、各カメラからのバレットタイム画像を生成する。"""
+    bullettime_imgs = []
+    world_point = np.array(world_point, dtype=float)
+    for src_img, extrinsic in zip(src_imgs, extrinsics):
+        ppi = generate_ppi_from_world_point(
+            world_point=world_point,
+            extrinsic=extrinsic,
+            src_img=src_img,
+            fov_w=fov_w,
+            fov_h=fov_h,
+            scale_distance=scale_dist
+        )
+        bullettime_imgs.append(ppi)
+    return bullettime_imgs

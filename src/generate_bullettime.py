@@ -18,7 +18,7 @@ from bullettime import (
     CropRecord,
     ReconstructionRecord,
     generate_front_ppis,
-    generate_ppi_from_world_point,
+    generate_bullettime_images,
     create_ppirecords,
     distance_based_nms,
     convert_ppi_record_to_crop,
@@ -39,6 +39,7 @@ from bullettime import (
     remove_records_by_paths,
     find_rays_within_distance,
     visualize_geometric_reid,
+    is_behind_any_camera,
 )
 
 def create_crop_records(camera_id: int, src_img, output_path,
@@ -142,19 +143,14 @@ def create_bullettime_from_croprecords(src_imgs: list[np.ndarray], output_path: 
 
     # バレットタイム映像用画像を生成し保存
     for person_idx, pt_3d in enumerate(representative_gaze_points):
-        bullettime_imgs = []
-        world_point = np.array(pt_3d, dtype=float)
-        for camera_id, (src_img, extrinsic) in enumerate(zip(src_imgs, extrinsics)):
-            ppi = generate_ppi_from_world_point(
-                world_point=world_point,
-                extrinsic=extrinsic,
-                src_img=src_img,
-                fov_w=fov_w,
-                fov_h=fov_h,
-                scale_distance=scale_dist
-            )
-            bullettime_imgs.append(ppi)
-            
+        bullettime_imgs = generate_bullettime_images(
+            world_point=pt_3d,
+            extrinsics=extrinsics,
+            src_imgs=src_imgs,
+            fov_w=fov_w,
+            fov_h=fov_h,
+            scale_dist=scale_dist
+        )
         if len(bullettime_imgs) > 0:
             iu.save_imgs(bullettime_imgs, f"{output_path}/05_bullettime", f"person_{person_idx:02d}_{{}}")
     
@@ -262,7 +258,8 @@ def generate_bullettime_from_croprecords(src_imgs: list[np.ndarray], output_path
 
 def generate_bullettime_by_geometric_person_reid(
         src_imgs: list[np.ndarray], output_path: Path, extrinsics_path: Path, crop_records_path: Path,
-        min_rays: int=3, length_idx: list[int] = [9, 7, 5, 6, 8, 10] , sim_th: float=0.75, sim_th_factor: float=0.5):
+        min_rays: int=3, length_idx: list[int] = [9, 7, 5, 6, 8, 10] , sim_th: float=0.75, sim_th_factor: float=0.5,
+        fov_w: float=60, fov_h: float=60, scale_dist: float=2.0):
     # クロップレコード，外部パラメータ読み込み
     all_crop_records = load_croprecords_json(str(crop_records_path))
     crop_records = list(all_crop_records)
@@ -285,18 +282,27 @@ def generate_bullettime_by_geometric_person_reid(
         # 3次元復元
         reconstruct_record = create_reconstruction_record(most_similar_pair_path, all_crop_records, extrinsics_data, src_w, src_h, length_idx) 
         ref_point = reconstruct_record.gaze_point_3d 
+        # カメラ後方判定
+        if is_behind_any_camera(ref_point, extrinsics_data):
+            print(f"Warning: Ref point {ref_point} is behind at least one camera. Skipping this pair.")
+            crop_records = remove_records_by_paths(crop_records, most_similar_pair_path)
+            continue
         ref_point_camera_ids = reconstruct_record.cameras
         dist_th = reconstruct_record.total_length * sim_th_factor
         gaze_rays = calculate_gaze_rays(crop_records, extrinsics_data)
         # 復元した3次元注視点との最小距離が閾値以下となる直線を探索
-        close_rays = find_rays_within_distance(ref_point, ref_point_camera_ids, dist_th, extrinsics_data, gaze_rays)
+        close_rays = find_rays_within_distance(ref_point, ref_point_camera_ids, dist_th, gaze_rays)
         # person_raysのパスをリスト化して結合
         close_rays_path = [ray.path for ray in close_rays]
         person_paths = most_similar_pair_path + close_rays_path
+        # person_pathsの数がmin_rays未満であればスキップ
+        if len(person_paths) < min_rays:
+            print(f"Warning: Number of person paths ({len(person_paths)}) is less than min_rays ({min_rays}). Skipping this pair.")
+            crop_records = remove_records_by_paths(crop_records, most_similar_pair_path)
+            continue
         # 結合したパスで3次元復元を再度適用
         reconstruct_record = create_reconstruction_record(person_paths, all_crop_records, extrinsics_data, src_w, src_h, length_idx)
         gaze_points_3d.append(reconstruct_record.gaze_point_3d)
-        
         # 可視化
         most_similar_records = [r for r in all_crop_records if r.crop_img_path in most_similar_pair_path]
         most_similar_rays = calculate_gaze_rays(most_similar_records, extrinsics_data)
@@ -321,6 +327,19 @@ def generate_bullettime_by_geometric_person_reid(
         # 使用済みレコード削除
         crop_records = remove_records_by_paths(crop_records, person_paths)
     
+    # バレットタイム映像用画像を生成し保存
+    for person_idx, pt_3d in enumerate(gaze_points_3d):
+        bullettime_imgs = generate_bullettime_images(
+            world_point=pt_3d,
+            extrinsics=extrinsics_data,
+            src_imgs=src_imgs,
+            fov_w=fov_w,
+            fov_h=fov_h,
+            scale_dist=scale_dist
+        )
+        if len(bullettime_imgs) > 0:
+            iu.save_imgs(bullettime_imgs, f"{output_path}/05_bullettime", f"person_{person_idx:02d}_{{}}")
+
     return gaze_points_3d
 
 def main():

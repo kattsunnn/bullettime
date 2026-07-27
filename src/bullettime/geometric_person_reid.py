@@ -74,7 +74,7 @@ def find_rays_within_distance(
     ref_point: list[float] | np.ndarray,
     exclude_camera_ids: list[int],
     dist_th: float,
-    extrinsics_data: np.ndarray,
+    # extrinsics_data: np.ndarray,
     gaze_rays: list[GazeRay]
 ) -> list[GazeRay]:
 
@@ -86,20 +86,20 @@ def find_rays_within_distance(
         # 除外処理
         if ray.camera_id in skip_camera_ids: # 復元に使用したカメラIDと同じものは除外
             continue
-        cam_idx = ray.camera_id # 該当するカメラが存在しない場合
-        if cam_idx >= len(extrinsics_data):
-            continue
+        # cam_idx = ray.camera_id # 該当するカメラが存在しない場合
+        # if cam_idx >= len(extrinsics_data):
+        #     continue
 
         # 世界座標系におけるz方向の光軸ベクトルを取得
-        extrinsic = extrinsics_data[cam_idx]
-        R = extrinsic[:3, :]
-        z_vector = R.T[:, 2]
+        # extrinsic = extrinsics_data[cam_idx]
+        # R = extrinsic[:3, :]
+        # z_vector = R.T[:, 2]
             
         C = ray.origin      # カメラの投影中心
         v = ray.direction   # 正規化された方向ベクトル
         
-        # 注視点がカメラの後方に位置する場合はスキップ
-        if np.dot(p - C, z_vector) < 0:
+        # 注視点が視線ベクトルの後方に位置する場合はスキップ
+        if np.dot(p - C, v) < 0:
             continue
             
         # 点と直線の距離の計算
@@ -185,3 +185,20 @@ def visualize_geometric_reid(
         plt.show()
     except ImportError:
         print("Warning: matplotlib is not installed. Skipping 3D visualization.")
+
+def is_behind_any_camera(ref_point: list[float] | np.ndarray, extrinsics_data: np.ndarray) -> bool:
+    """
+    指定された3次元点(ref_point)が、extrinsics_dataに含まれるカメラのいずれか一つの後方に位置しているかを判定する。
+    """
+    p = np.array(ref_point)
+    for cam_idx, extrinsic in enumerate(extrinsics_data):
+        R = extrinsic[:3, :]
+        t = extrinsic[3, :]
+        C = -R.T @ t
+        z_vector = R.T[:, 2]
+        
+        # 点pとカメラ中心Cの差分ベクトルと、光軸ベクトルz_vectorの内積を計算
+        # 内積が負の場合、点はカメラの後方に位置する
+        if np.dot(p - C, z_vector) < 0:
+            return True
+    return False

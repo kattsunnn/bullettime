@@ -4,6 +4,7 @@ from .ppi import (
     generate_front_ppis,
     generate_ppi,
     generate_ppi_from_world_point,
+    generate_bullettime_images,
 )
 from .detection import (
     create_ppirecords,
@@ -33,5 +34,6 @@ from .geometric_person_reid import (
     calculate_gaze_rays,
     find_rays_within_distance,
     visualize_geometric_reid,
+    is_behind_any_camera,
 )
 
