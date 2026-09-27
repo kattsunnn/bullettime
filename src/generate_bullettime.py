@@ -279,30 +279,63 @@ def generate_bullettime_by_geometric_person_reid(
             break
         most_similar_pair = max(valid_pairs, key=lambda x: x[2])
         most_similar_pair_path = [most_similar_pair[0], most_similar_pair[1]]
+        # 最も類似するペアを保存
+        iter_data = {
+            "status": "processing",
+            "most_similar_pair": {
+                "path": most_similar_pair_path,
+                "similarity": float(most_similar_pair[2])
+            },
+        }
+        geometric_reid_process.append(iter_data)
+        save_geometric_reid_process_json(f"{output_path}/02_data/geometric_reid_process.json", geometric_reid_process)
+
         # 3次元復元
         reconstruct_record = create_reconstruction_record(most_similar_pair_path, all_crop_records, extrinsics_data, src_w, src_h, length_idx) 
         ref_point = reconstruct_record.gaze_point_3d 
         # カメラ後方判定
-        if is_behind_any_camera(ref_point, extrinsics_data):
+        is_behind = is_behind_any_camera(ref_point, extrinsics_data)
+        if is_behind:
             print(f"Warning: Ref point {ref_point} is behind at least one camera. Skipping this pair.")
+            # is_behindであれば保存
+            iter_data["status"] = "skipped_behind_camera"
+            save_geometric_reid_process_json(f"{output_path}/02_data/geometric_reid_process.json", geometric_reid_process)
             crop_records = remove_records_by_paths(crop_records, most_similar_pair_path)
             continue
         ref_point_camera_ids = reconstruct_record.cameras
         dist_th = reconstruct_record.total_length * sim_th_factor
+        # 注視点候補を保存
+        iter_data["ref_point"] = ref_point
+        iter_data["ref_point_camera_ids"] = ref_point_camera_ids
+        iter_data["dist_th"] = dist_th
+        save_geometric_reid_process_json(f"{output_path}/02_data/geometric_reid_process.json", geometric_reid_process)
+
+        # 同一人物の直線を探索
         gaze_rays = calculate_gaze_rays(crop_records, extrinsics_data)
-        # 復元した3次元注視点との最小距離が閾値以下となる直線を探索
         close_rays = find_rays_within_distance(ref_point, ref_point_camera_ids, dist_th, gaze_rays)
         # person_raysのパスをリスト化して結合
         close_rays_path = [ray.path for ray in close_rays]
         person_paths = most_similar_pair_path + close_rays_path
+        # 同一人物と思われる直線群を保存
+        iter_data["person_paths"] = person_paths
+        save_geometric_reid_process_json(f"{output_path}/02_data/geometric_reid_process.json", geometric_reid_process)
+
         # person_pathsの数がmin_rays未満であればスキップ
         if len(person_paths) < min_rays:
             print(f"Warning: Number of person paths ({len(person_paths)}) is less than min_rays ({min_rays}). Skipping this pair.")
+            iter_data["status"] = "skipped_less_than_min_rays"
+            save_geometric_reid_process_json(f"{output_path}/02_data/geometric_reid_process.json", geometric_reid_process)
             crop_records = remove_records_by_paths(crop_records, most_similar_pair_path)
             continue
-        # 結合したパスで3次元復元を再度適用
+
+        # 注視点の3次元復元
         reconstruct_record = create_reconstruction_record(person_paths, all_crop_records, extrinsics_data, src_w, src_h, length_idx)
         gaze_points_3d.append(reconstruct_record.gaze_point_3d)
+        # 注視点を保存
+        iter_data["gaze_3d_point"] = reconstruct_record.gaze_point_3d
+        iter_data["status"] = "success"
+        save_geometric_reid_process_json(f"{output_path}/02_data/geometric_reid_process.json", geometric_reid_process)
+
         # 可視化
         most_similar_records = [r for r in all_crop_records if r.crop_img_path in most_similar_pair_path]
         most_similar_rays = calculate_gaze_rays(most_similar_records, extrinsics_data)
@@ -312,17 +345,7 @@ def generate_bullettime_by_geometric_person_reid(
             ref_point=ref_point,
             final_gaze_point=reconstruct_record.gaze_point_3d
         )
-        
-        # ログ保存 
-        iter_data = {
-            "most_similar_pair": most_similar_pair,
-            "ref_point": ref_point,
-            "dist_th": dist_th,
-            "close_ray_path": close_rays_path,
-            "gaze_3d_point": reconstruct_record.gaze_point_3d
-        }
-        geometric_reid_process.append(iter_data)
-        save_geometric_reid_process_json(f"{output_path}/02_data/geometric_reid_process.json", geometric_reid_process)
+
 
         # 使用済みレコード削除
         crop_records = remove_records_by_paths(crop_records, person_paths)
