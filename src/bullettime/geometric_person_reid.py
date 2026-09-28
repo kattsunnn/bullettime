@@ -99,7 +99,9 @@ def find_rays_within_distance(
         v = ray.direction   # 正規化された方向ベクトル
         
         # 注視点が視線ベクトルの後方に位置する場合はスキップ
-        if np.dot(p - C, v) < 0:
+        # if np.dot(p - C, v) < 0:
+        # 注視点の視線ベクトルがカメラの前方90度より外側にある場合はスキップ
+        if np.dot(p - C, v) < 1/np.sqrt(2):
             continue
             
         # 点と直線の距離の計算
