@@ -72,7 +72,14 @@ def load_extrinsics(pose_path: Path) -> np.ndarray:
         if isinstance(cam_val, dict) and "R" in cam_val and "t" in cam_val:
             R = np.array(cam_val["R"], dtype=float)
             t = np.array(cam_val["t"], dtype=float)
-            extrinsic = np.vstack([R, t])  # shape (3, 3)
+            # Validate shapes
+            if R.shape != (3, 3):
+                raise ValueError(f"Camera '{cam_key}': 'R' must be a 3x3 matrix, got shape {R.shape}.")
+            if t.size != 3:
+                raise ValueError(f"Camera '{cam_key}': 't' must have 3 elements, got {t.size} elements.")
+            # Ensure t is a 1D row vector of length 3 so vstack produces (4, 3)
+            t = t.reshape(3)
+            extrinsic = np.vstack([R, t])  # shape (4, 3)
             extrinsics_list.append(extrinsic)
         else:
             print(f"Warning: 'R' or 't' not found in '{cam_key}'. Skipping.")
