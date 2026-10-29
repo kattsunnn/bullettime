@@ -37,3 +37,7 @@ from .geometric_person_reid import (
     is_behind_any_camera,
 )
 
+from .clustering import (
+    spherical_clustering_3d_points,
+)
+
