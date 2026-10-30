@@ -40,4 +40,8 @@ from .geometric_person_reid import (
 from .clustering import (
     spherical_clustering_3d_points,
 )
+from .visualization import (
+    visualize_camera_pose_and_3d_points,
+    visualize_cameras_and_3d_points,
+)
 
